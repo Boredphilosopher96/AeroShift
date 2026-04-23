@@ -153,6 +153,7 @@ private struct PlannerObserverPipeline: BenchmarkPipeline {
                 windowId: event.windowId,
                 timestampNs: event.timestampNs,
                 isLeftMouseButtonDown: event.mouseDown,
+                leftMouseUpContext: event.kind == .leftMouseUp ? .init(monitorTopLeftCorner: .zero) : nil,
             ),
         )
         apply(core.drainImmediate(), at: event.timestampNs)
@@ -218,10 +219,10 @@ private struct PlannerObserverPipeline: BenchmarkPipeline {
                     }
                     flushLeftMouseUpEvents(at: nowNs)
 
-                case .mouseMove(let windowId):
+                case .mouseMove(let windowId, _):
                     flushMovedEvents(windowId, at: nowNs)
 
-                case .mouseResize(let windowId):
+                case .mouseResize(let windowId, _):
                     flushResizedEvents(windowId, at: nowNs)
 
                 case .resetManipulatedMouse:

@@ -22,14 +22,14 @@ final class ObserverPlannerCoreTest: XCTestCase {
 
         assertEquals(core.pendingGeometryIntentCount, 1)
         assertEquals(core.drainGeometryIfReady(at: observerPlannerGeometryDebounceNs - 1), [])
-        assertEquals(core.drainGeometryIfReady(at: observerPlannerGeometryDebounceNs), [.mouseResize(200)])
+        assertEquals(core.drainGeometryIfReady(at: observerPlannerGeometryDebounceNs), [.mouseResize(200, 7)])
     }
 
     func testInteractiveGeometryFiresImmediately() {
         var core = ObserverPlannerCore()
         core.ingest(event(.axWindowMoved, pid: 7, windowId: 200, at: 0, mouseDown: true))
 
-        assertEquals(core.drainImmediate(), [.mouseMove(200)])
+        assertEquals(core.drainImmediate(), [.mouseMove(200, 7)])
         assertEquals(core.pendingGeometryIntentCount, 0)
     }
 
@@ -38,13 +38,13 @@ final class ObserverPlannerCoreTest: XCTestCase {
         core.ingest(event(.axWindowCreated, pid: 1, windowId: 10, at: 0, mouseDown: true))
         assertEquals(core.drainImmediate(), [.refreshApp(1)])
         core.ingest(event(.axWindowResized, pid: 2, windowId: 20, at: 1, mouseDown: true))
-        assertEquals(core.drainImmediate(), [.mouseResize(20)])
+        assertEquals(core.drainImmediate(), [.mouseResize(20, 2)])
         assertEquals(core.pendingUncertainPidCount, 2)
 
         core.ingest(event(.leftMouseUp, pid: nil, windowId: nil, at: 2))
         assertEquals(
             core.drainImmediate(),
-            [.resetManipulatedMouse, .syncMonitorFocus, .refreshApp(1), .refreshApp(2)],
+            [.resetManipulatedMouse, .syncMonitorFocus(testLeftMouseUpContext), .refreshApp(1), .refreshApp(2)],
         )
         assertEquals(core.pendingUncertainPidCount, 0)
     }
@@ -84,9 +84,17 @@ final class ObserverPlannerCoreTest: XCTestCase {
         core.ingest(event(.axFocusedWindowChanged, pid: 2, windowId: 21, at: 2))
         assertEquals(core.drainImmediate(), [])
         core.ingest(event(.leftMouseUp, pid: nil, windowId: nil, at: 3))
-        assertEquals(core.drainImmediate(), [.resetManipulatedMouse, .syncMonitorFocus])
+        assertEquals(core.drainImmediate(), [.resetManipulatedMouse, .syncMonitorFocus(testLeftMouseUpContext)])
         assertEquals(core.drainShortIfReady(at: 1 + observerPlannerShortDebounceNs), [.refreshApp(2)])
-        assertEquals(core.drainGeometryIfReady(at: observerPlannerGeometryDebounceNs), [.mouseMove(11)])
+        assertEquals(core.drainGeometryIfReady(at: observerPlannerGeometryDebounceNs), [.mouseMove(11, 1)])
+    }
+
+    @MainActor
+    func testLeftMouseUpRepairPlanFallsBackToFullRefreshWhenWorkspaceHasNoTrackedWindows() {
+        setUpWorkspacesForTests()
+
+        let context = LeftMouseUpContext(monitorTopLeftCorner: mainMonitor.rect.topLeftCorner)
+        assertEquals(planLeftMouseUpRepair(context), .fullRefresh)
     }
 }
 
@@ -145,7 +153,7 @@ final class ObserverPlannerSimulationTest: XCTestCase {
         harness.drainAll()
 
         assertEquals(harness.estimated, harness.actual)
-        XCTAssertTrue(harness.appliedIntents.contains(.syncMonitorFocus))
+        XCTAssertTrue(harness.appliedIntents.contains(.syncMonitorFocus(testLeftMouseUpContext)))
     }
 
     func testRegressionFocusedWindowStormStillCoalesces() {
@@ -328,7 +336,7 @@ private struct PlannerSimulationHarness {
                     estimated.syncApp(pid, from: actual)
                 case .fullRefresh:
                     estimated = actual
-                case .mouseMove(let windowId), .mouseResize(let windowId):
+                case .mouseMove(let windowId, _), .mouseResize(let windowId, _):
                     if let pid = actual.owner(of: windowId) {
                         estimated.syncApp(pid, from: actual)
                     }
@@ -483,6 +491,17 @@ private func event(
     windowId: UInt32?,
     at timestampNs: UInt64,
     mouseDown: Bool = false,
+    leftMouseUpContext: LeftMouseUpContext? = nil,
 ) -> ObserverIngressEvent {
-    .init(kind: kind, pid: pid, windowId: windowId, timestampNs: timestampNs, isLeftMouseButtonDown: mouseDown)
+    let resolvedLeftMouseUpContext = leftMouseUpContext ?? (kind == .leftMouseUp ? testLeftMouseUpContext : nil)
+    return .init(
+        kind: kind,
+        pid: pid,
+        windowId: windowId,
+        timestampNs: timestampNs,
+        isLeftMouseButtonDown: mouseDown,
+        leftMouseUpContext: resolvedLeftMouseUpContext,
+    )
 }
+
+private let testLeftMouseUpContext = LeftMouseUpContext(monitorTopLeftCorner: .zero)

@@ -40,8 +40,11 @@ final class PlannerExecutor {
             case .fullRefresh(let reason):
                 scheduleCancellableCompleteRefreshSession(.globalObserver("planner.fullRefresh.\(reason.description)"))
 
-            case .mouseMove(let windowId):
-                guard let window = Window.get(byId: windowId) else { return }
+            case .mouseMove(let windowId, let fallbackPid):
+                guard let window = Window.get(byId: windowId) else {
+                    await recoverMissingGeometryWindow("mouseMove", windowId: windowId, fallbackPid: fallbackPid)
+                    return
+                }
                 if await shouldHandleMouseManipulation(window) {
                     await runPlannerSession(.ax("planner.mouseMove(\(windowId))")) {
                         try await moveWithMouse(window)
@@ -52,8 +55,11 @@ final class PlannerExecutor {
                     }
                 }
 
-            case .mouseResize(let windowId):
-                guard let window = Window.get(byId: windowId) else { return }
+            case .mouseResize(let windowId, let fallbackPid):
+                guard let window = Window.get(byId: windowId) else {
+                    await recoverMissingGeometryWindow("mouseResize", windowId: windowId, fallbackPid: fallbackPid)
+                    return
+                }
                 if await shouldHandleMouseManipulation(window) {
                     await runPlannerSession(.ax("planner.mouseResize(\(windowId))")) {
                         try await resizeWithMouse(window)
@@ -74,8 +80,8 @@ final class PlannerExecutor {
                     try await handleHideApplication(pid: pid)
                 }
 
-            case .syncMonitorFocus:
-                await syncMonitorFocusAfterLeftMouseUp()
+            case .syncMonitorFocus(let context):
+                await syncMonitorFocusAfterLeftMouseUp(context)
         }
     }
 
@@ -111,31 +117,60 @@ final class PlannerExecutor {
         }
     }
 
-    private func syncMonitorFocusAfterLeftMouseUp() async {
-        guard let token: RunSessionGuard = .isServerEnabled else { return }
-        let clickedMonitor = mouseLocation.monitorApproximation
-        if clickedMonitor.activeWorkspace != focus.workspace {
-            do {
-                _ = try await runLightSession(.globalObserverLeftMouseUp, token, scheduleFollowupRefresh: false) {
-                    clickedMonitor.activeWorkspace.focusWorkspace()
-                }
-                return
-            } catch let error as CancellationError {
-                _ = error
-                return
-            } catch {
-                die("Illegal error: \(error)")
+    private func recoverMissingGeometryWindow(_ kind: String, windowId: UInt32, fallbackPid: pid_t?) async {
+        if let fallbackPid {
+            await runPlannerSession(.ax("planner.\(kind).recoverMissingWindow(\(windowId))"), normalizeLayoutAfterBody: true) {
+                try await refreshApp(pid: fallbackPid)
             }
-        }
-
-        let pidsToRefresh = OrderedSet(clickedMonitor.activeWorkspace.allLeafWindowsRecursive.map(\.app.pid))
-        guard !pidsToRefresh.isEmpty else { return }
-        await runPlannerSession(.globalObserverLeftMouseUp) {
-            for pid in pidsToRefresh {
-                try await refreshApp(pid: pid)
-            }
+        } else {
+            scheduleCancellableCompleteRefreshSession(.globalObserver("planner.\(kind).missingWindow.\(windowId)"))
         }
     }
+
+    private func syncMonitorFocusAfterLeftMouseUp(_ context: LeftMouseUpContext?) async {
+        guard let token: RunSessionGuard = .isServerEnabled else { return }
+        switch planLeftMouseUpRepair(context) {
+            case .focusWorkspace(let workspaceName):
+                let clickedWorkspace = Workspace.get(byName: workspaceName)
+                do {
+                    _ = try await runLightSession(.globalObserverLeftMouseUp, token, scheduleFollowupRefresh: false) {
+                        clickedWorkspace.focusWorkspace()
+                    }
+                } catch let error as CancellationError {
+                    _ = error
+                } catch {
+                    die("Illegal error: \(error)")
+                }
+
+            case .refreshApps(let pidsToRefresh):
+                await runPlannerSession(.globalObserverLeftMouseUp) {
+                    for pid in pidsToRefresh {
+                        try await refreshApp(pid: pid)
+                    }
+                }
+
+            case .fullRefresh:
+                scheduleCancellableCompleteRefreshSession(.globalObserverLeftMouseUp)
+        }
+    }
+}
+
+enum LeftMouseUpRepairPlan: Equatable {
+    case focusWorkspace(String)
+    case refreshApps(OrderedSet<pid_t>)
+    case fullRefresh
+}
+
+@MainActor
+func planLeftMouseUpRepair(_ context: LeftMouseUpContext?) -> LeftMouseUpRepairPlan {
+    guard let context else { return .fullRefresh }
+    let clickedMonitor = context.monitorTopLeftCorner.monitorApproximation
+    if clickedMonitor.activeWorkspace != focus.workspace {
+        return .focusWorkspace(clickedMonitor.activeWorkspace.name)
+    }
+
+    let pidsToRefresh = OrderedSet(clickedMonitor.activeWorkspace.allLeafWindowsRecursive.map(\.app.pid))
+    return pidsToRefresh.isEmpty ? .fullRefresh : .refreshApps(pidsToRefresh)
 }
 
 final class ObserverPlanner: @unchecked Sendable {

@@ -87,6 +87,10 @@ description = "Build release artifacts and verify the source-install path in CI"
 depends = ["bundle-install"]
 run = """
 set -euo pipefail
-./build-release.sh --codesign-identity -
+if [ -n "${AEROSHIFT_BUILD_VERSION:-}" ]; then
+  ./build-release.sh --build-version "$AEROSHIFT_BUILD_VERSION" --codesign-identity -
+else
+  ./build-release.sh --codesign-identity -
+fi
 ./install-from-sources.sh --dont-rebuild
 """
