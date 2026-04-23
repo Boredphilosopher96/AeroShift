@@ -1,5 +1,8 @@
 name: release-bundles
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches:
@@ -53,27 +56,7 @@ jobs:
         name: Compute bundle version
         env:
           RELEASE_TYPE: ${{ inputs.release_type }}
-        run: |
-          set -euo pipefail
-          commit_sha="$(git rev-parse HEAD)"
-          bump_type="${RELEASE_TYPE:-patch}"
-          if test "$GITHUB_EVENT_NAME" != "workflow_dispatch"; then
-            bump_type=patch
-          fi
-          build_version="$(RELEASE_TYPE="$bump_type" mise run release-next-version)"
-          is_release=true
-          release_tag="v${build_version}"
-          release_page_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${release_tag}"
-          release_zip_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${release_tag}/Aeroshift-v${build_version}.zip"
-          release_zip_name="Aeroshift-v${build_version}.zip"
-          echo "artifact_name=release-bundles-${build_version}" >> "$GITHUB_OUTPUT"
-          echo "build_version=${build_version}" >> "$GITHUB_OUTPUT"
-          echo "commit_sha=${commit_sha}" >> "$GITHUB_OUTPUT"
-          echo "is_release=${is_release}" >> "$GITHUB_OUTPUT"
-          echo "release_page_url=${release_page_url}" >> "$GITHUB_OUTPUT"
-          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
-          echo "release_zip_name=${release_zip_name}" >> "$GITHUB_OUTPUT"
-          echo "release_zip_url=${release_zip_url}" >> "$GITHUB_OUTPUT"
+        run: mise run release-bundle-metadata
       - name: mise run release-ci
         env:
           AEROSHIFT_BUILD_VERSION: ${{ steps.bundle-version.outputs.build_version }}
@@ -117,7 +100,7 @@ jobs:
           install: false
           cache: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
-      - run: mise install ruby github:cli/cli
+      - run: mise install
       - name: Download release bundle artifacts
         uses: actions/download-artifact@v5
         with:
@@ -148,3 +131,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: mise run release-publish
+      - name: Publish Homebrew tap cask
+        # HOMEBREW_TAP_GH_TOKEN must have contents:write on
+        # Boredphilosopher96/homebrew-aeroshift.
+        env:
+          AEROSHIFT_HOMEBREW_TAP_COMMIT_MESSAGE: Update Homebrew casks for ${{ needs.build-release-bundles.outputs.release_tag }}
+          AEROSHIFT_HOMEBREW_TAP_CASK_FILES: .release/aeroshift.rb
+          AEROSHIFT_RELEASE_TAG: ${{ needs.build-release-bundles.outputs.release_tag }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GH_TOKEN }}
+        run: mise run release-publish-homebrew-tap

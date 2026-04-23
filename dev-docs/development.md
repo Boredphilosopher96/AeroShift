@@ -67,6 +67,8 @@ The shell scripts below are the underlying implementation that those tasks run.
 -   `install-from-sources.sh` - Build release build from sources and install it as `aeroshift-dev` brew cask.
     This script is "work in progress".
     Use it on your own risk.
+-   `.github/workflows/release-bundles.yml` - Publishes the GitHub release and syncs the primary `aeroshift` cask to `Boredphilosopher96/homebrew-aeroshift`.
+    The publish job expects a `HOMEBREW_TAP_GH_TOKEN` secret with `contents:write` access to that tap repository.
 
 ## IDE
 
