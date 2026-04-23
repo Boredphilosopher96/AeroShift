@@ -351,6 +351,11 @@ extension AXUIElement: AxUiElementMock {
         var cgWindowId = CGWindowID()
         return unsafe _AXUIElementGetWindow(self, &cgWindowId) == .success ? cgWindowId : nil
     }
+
+    var processIdentifier: pid_t? {
+        var pid = pid_t()
+        return unsafe AXUIElementGetPid(self, &pid) == .success ? pid : nil
+    }
 }
 
 extension AXObserver {

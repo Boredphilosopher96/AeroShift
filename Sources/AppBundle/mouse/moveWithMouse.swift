@@ -2,29 +2,7 @@ import AppKit
 import Common
 
 @MainActor
-private var moveWithMouseTask: Task<(), any Error>? = nil
-
-func movedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutableRawPointer?) {
-    let windowId = ax.containingWindowId()
-    let notif = notif as String
-    Task { @MainActor in
-        guard let token: RunSessionGuard = .isServerEnabled else { return }
-        guard let windowId, let window = Window.get(byId: windowId), try await isManipulatedWithMouse(window) else {
-            scheduleCancellableCompleteRefreshSession(.ax(notif))
-            return
-        }
-        moveWithMouseTask?.cancel()
-        moveWithMouseTask = Task {
-            try checkCancellation()
-            try await runLightSession(.ax(notif), token) {
-                try await moveWithMouse(window)
-            }
-        }
-    }
-}
-
-@MainActor
-private func moveWithMouse(_ window: Window) async throws { // todo cover with tests
+func moveWithMouse(_ window: Window) async throws { // todo cover with tests
     resetClosedWindowsCache()
     guard let parent = window.parent else { return }
     switch parent.cases {
