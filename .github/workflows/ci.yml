@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  repo-quality:
+    name: repo-quality
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+        with:
+          version: 2026.4.18
+          install: false
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - run: mise install
+      - run: mise run gha-select-xcode
+      - run: mise run doctor
+      - run: mise run ci-quality
+
+  compat-build:
+    strategy:
+      matrix:
+        os: [macos-14, macos-15, macos-26]
+    name: compat-build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+        with:
+          version: 2026.4.18
+          install: false
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - run: mise install
+      - run: mise run gha-select-xcode
+      - run: mise run doctor
+      - run: mise run ci-compat
+
+  security:
+    name: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+        with:
+          version: 2026.4.18
+          install: false
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - run: mise install ruby github:cli/cli github:google/osv-scanner github:rhysd/actionlint
+      - run: mise run security

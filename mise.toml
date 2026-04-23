@@ -14,6 +14,9 @@ periphery = "3.7.2"
 xcbeautify = "3.2.1"
 "pipx:antlr4-tools" = "0.2.2"
 "github:adaszko/complgen" = { version = "0.9.0", bin = "complgen" }
+"github:cli/cli" = { version = "2.91.0", bin = "gh" }
+"github:google/osv-scanner" = { version = "2.3.5", bin = "osv-scanner" }
+"github:rhysd/actionlint" = { version = "1.7.12", bin = "actionlint" }
 "aqua:fish-shell/fish-shell" = { version = "4.6.0", symlink_bins = true }
 
 [tasks.doctor]
@@ -42,6 +45,15 @@ fi
 fish --version
 """
 
+[tasks.workflow-lint]
+description = "Lint GitHub Actions workflows"
+run = "actionlint .github/workflows/*.yml"
+
+[tasks.gha-select-xcode]
+hide = true
+description = "Select the expected Xcode version on GitHub-hosted macOS runners"
+run = "bash ./.github/gh-actions-runner-xcode-select.sh"
+
 [tasks.bundle-install]
 hide = true
 description = "Install Ruby gem dependencies"
@@ -59,6 +71,25 @@ run = "./build-debug.sh"
 [tasks.test]
 description = "Run the repo test suite"
 run = "./test.sh"
+
+[tasks.ci-quality]
+description = "Run the repo-quality CI lane"
+depends = ["workflow-lint"]
+run = "./test.sh"
+
+[tasks.ci-compat]
+description = "Run the compatibility build/test lane"
+run = """
+set -euo pipefail
+./build-debug.sh -Xswiftc -warnings-as-errors
+./swift-test.sh
+./.debug/aeroshift --help > /dev/null
+./.debug/aeroshift --version > /dev/null
+"""
+
+[tasks.security]
+description = "Run dependency security checks"
+run = 'osv-scanner scan source -L "$PWD/Gemfile.lock"'
 
 [tasks.docs]
 description = "Build the website and man pages"
@@ -92,14 +123,90 @@ if [ -n "${AEROSHIFT_BUILD_VERSION:-}" ]; then
 else
   ./build-release.sh --codesign-identity -
 fi
-if [ -n "${AEROSHIFT_RELEASE_ZIP_URI:-}" ]; then
-  if [ -z "${AEROSHIFT_BUILD_VERSION:-}" ]; then
-    echo "AEROSHIFT_BUILD_VERSION is required when AEROSHIFT_RELEASE_ZIP_URI is set" >&2
+./install-from-sources.sh --dont-rebuild
+"""
+
+[tasks.release-next-version]
+description = "Compute the next release version"
+run = """
+set -euo pipefail
+bump_type="${RELEASE_TYPE:-patch}"
+bash ./script/next-release-version.sh "$bump_type"
+"""
+
+[tasks.release-casks-github-url]
+description = "Regenerate release casks to point at GitHub release assets"
+run = """
+set -euo pipefail
+if [ -z "${AEROSHIFT_BUILD_VERSION:-}" ]; then
+  echo "AEROSHIFT_BUILD_VERSION is required" >&2
+  exit 1
+fi
+if [ -z "${AEROSHIFT_RELEASE_ZIP_URI:-}" ]; then
+  echo "AEROSHIFT_RELEASE_ZIP_URI is required" >&2
+  exit 1
+fi
+zip_sha_source="${AEROSHIFT_RELEASE_ZIP_SHA_SOURCE:-.release/Aeroshift-v${AEROSHIFT_BUILD_VERSION}.zip}"
+./script/build-brew-cask.sh --cask-name aeroshift --zip-uri "$AEROSHIFT_RELEASE_ZIP_URI" --zip-sha-source "$zip_sha_source" --build-version "$AEROSHIFT_BUILD_VERSION"
+./script/build-brew-cask.sh --cask-name aeroshift-dev --zip-uri "$AEROSHIFT_RELEASE_ZIP_URI" --zip-sha-source "$zip_sha_source" --build-version "$AEROSHIFT_BUILD_VERSION"
+"""
+
+[tasks.release-publish]
+description = "Create or update the GitHub release and upload release assets"
+run = """
+set -euo pipefail
+if [ -z "${AEROSHIFT_RELEASE_TAG:-}" ]; then
+  echo "AEROSHIFT_RELEASE_TAG is required" >&2
+  exit 1
+fi
+if [ -z "${AEROSHIFT_RELEASE_TARGET:-}" ]; then
+  echo "AEROSHIFT_RELEASE_TARGET is required" >&2
+  exit 1
+fi
+if [ -z "${AEROSHIFT_RELEASE_ASSETS:-}" ]; then
+  echo "AEROSHIFT_RELEASE_ASSETS is required" >&2
+  exit 1
+fi
+
+release_title="${AEROSHIFT_RELEASE_TITLE:-$AEROSHIFT_RELEASE_TAG}"
+workflow_run_url="unavailable"
+if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
+  workflow_run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+fi
+release_notes="${AEROSHIFT_RELEASE_NOTES:-Automated release bundle for main.
+
+Commit: ${AEROSHIFT_RELEASE_TARGET}
+Workflow run: ${workflow_run_url}}"
+
+assets=()
+while IFS= read -r asset; do
+  if [ -z "$asset" ]; then
+    continue
+  fi
+  if ! test -f "$asset"; then
+    echo "Missing release asset: $asset" >&2
     exit 1
   fi
-  local_release_zip=".release/Aeroshift-v${AEROSHIFT_BUILD_VERSION}.zip"
-  ./script/build-brew-cask.sh --cask-name aeroshift --zip-uri "$AEROSHIFT_RELEASE_ZIP_URI" --zip-sha-source "$local_release_zip" --build-version "$AEROSHIFT_BUILD_VERSION"
-  ./script/build-brew-cask.sh --cask-name aeroshift-dev --zip-uri "$AEROSHIFT_RELEASE_ZIP_URI" --zip-sha-source "$local_release_zip" --build-version "$AEROSHIFT_BUILD_VERSION"
+  assets+=("$asset")
+done <<EOF
+${AEROSHIFT_RELEASE_ASSETS}
+EOF
+
+if [ "${AEROSHIFT_RELEASE_DRY_RUN:-0}" = "1" ]; then
+  printf 'release_tag=%s\n' "$AEROSHIFT_RELEASE_TAG"
+  printf 'release_target=%s\n' "$AEROSHIFT_RELEASE_TARGET"
+  printf 'release_title=%s\n' "$release_title"
+  printf 'release_notes=%s\n' "$release_notes"
+  printf 'asset=%s\n' "${assets[@]}"
+  exit 0
 fi
-./install-from-sources.sh --dont-rebuild
+
+if gh release view "$AEROSHIFT_RELEASE_TAG" > /dev/null 2>&1; then
+  gh release upload "$AEROSHIFT_RELEASE_TAG" "${assets[@]}" --clobber
+else
+  gh release create "$AEROSHIFT_RELEASE_TAG" "${assets[@]}" \
+    --target "$AEROSHIFT_RELEASE_TARGET" \
+    --title "$release_title" \
+    --notes "$release_notes"
+fi
 """
