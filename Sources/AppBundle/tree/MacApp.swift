@@ -33,7 +33,6 @@ final class MacApp: AbstractApp {
         self.pid = nsApp.processIdentifier
         self.rawAppBundleId = nsApp.bundleIdentifier
         self.appId = nsApp.bundleIdentifier.flatMap { KnownBundleId.init(rawValue: $0) }
-        assert(!axSubscriptions.isEmpty)
         self.appAxSubscriptions = .init(axSubscriptions)
         self.thread = thread
     }
@@ -61,21 +60,23 @@ final class MacApp: AbstractApp {
             let thread = Thread {
                 $axTaskLocalAppThreadToken.withValue(AxAppThreadToken(pid: pid, idForDebug: nsApp.idForDebug)) {
                     let axApp = AXUIElementCreateApplication(nsApp.processIdentifier)
-                    let handlers: HandlerToNotifKeyMapping = unsafe [
-                        (refreshObs, [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification]),
-                    ]
                     let job = RunLoopJob()
-                    let subscriptions = (try? unsafe AxSubscription.bulkSubscribe(nsApp, axApp, job, handlers)) ?? []
-                    let isGood = !subscriptions.isEmpty
-                    let app = isGood ? MacApp(nsApp, axApp, subscriptions, Thread.current) : nil
+                    let keepAliveSource = newKeepAliveRunLoopSource()
+                    CFRunLoopAddSource(CFRunLoopGetCurrent(), keepAliveSource, .defaultMode)
+                    let registration = (try? unsafe AxSubscription.bulkSubscribeDetailed(
+                        nsApp,
+                        axApp,
+                        job,
+                        ObserverIngress.appAxObserverHandlers,
+                    )) ?? ObserverRegistrationResult(subscriptions: [], requestedNotifications: [], failedNotifications: [])
+                    ObserverIngress.publishRegistrationResult(registration, pid: pid, windowId: nil)
+                    let app = MacApp(nsApp, axApp, registration.subscriptions, Thread.current)
                     Task { @MainActor in
                         allAppsMap[pid] = app
                         await wip.signalToAll()
                         wipPids[pid] = nil
                     }
-                    if isGood {
-                        CFRunLoopRun()
-                    }
+                    CFRunLoopRun()
                 }
             }
             thread.name = "AxAppThread \(nsApp.idForDebug)"
@@ -266,6 +267,24 @@ final class MacApp: AbstractApp {
         }
     }
 
+    @MainActor
+    static func refreshAppAndGetAliveWindowIds(pid: pid_t, frontmostAppBundleId: String?) async throws -> (MacApp?, [UInt32]) {
+        if let app = allAppsMap[pid] {
+            if app.nsApp.isTerminated {
+                await app.destroy()
+                return (nil, [])
+            }
+            return (app, try await app.refreshAndGetAliveWindowIds(frontmostAppBundleId: frontmostAppBundleId))
+        }
+        guard let nsApp = NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == pid }) else {
+            return (nil, [])
+        }
+        guard let app = try await getOrRegister(nsApp) else {
+            return (nil, [])
+        }
+        return (app, try await app.refreshAndGetAliveWindowIds(frontmostAppBundleId: frontmostAppBundleId))
+    }
+
     private func refreshAndGetAliveWindowIds(frontmostAppBundleId: String?) async throws -> [UInt32] {
         if nsApp.isTerminated {
             await destroy()
@@ -338,18 +357,13 @@ private final class AxWindow {
     private init(windowId: UInt32, _ ax: AXUIElement, _ axSubscriptions: [AxSubscription]) {
         self.windowId = windowId
         self.ax = ax
-        assert(!axSubscriptions.isEmpty)
         self.axSubscriptions = axSubscriptions
     }
 
     static func new(windowId: UInt32, _ ax: AXUIElement, _ nsApp: NSRunningApplication, _ job: RunLoopJob) throws -> AxWindow? {
-        let handlers: HandlerToNotifKeyMapping = unsafe [
-            (refreshObs, [kAXUIElementDestroyedNotification, kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification]),
-            (movedObs, [kAXMovedNotification]),
-            (resizedObs, [kAXResizedNotification]),
-        ]
-        let subscriptions = try unsafe AxSubscription.bulkSubscribe(nsApp, ax, job, handlers)
-        return !subscriptions.isEmpty ? AxWindow(windowId: windowId, ax, subscriptions) : nil
+        let registration = try unsafe AxSubscription.bulkSubscribeDetailed(nsApp, ax, job, ObserverIngress.windowAxObserverHandlers)
+        ObserverIngress.publishRegistrationResult(registration, pid: nsApp.processIdentifier, windowId: windowId)
+        return AxWindow(windowId: windowId, ax, registration.subscriptions)
     }
 }
 
@@ -357,11 +371,6 @@ extension [UInt32: AxWindow] {
     @discardableResult
     fileprivate mutating func getOrRegisterAxWindow(windowId id: UInt32, _ axWindow: AXUIElement, _ nsApp: NSRunningApplication, _ job: RunLoopJob) throws -> AxWindow? {
         if let existing = self[id] { return existing }
-        // Delay new window detection if mouse is down
-        // It helps with apps that allow dragging their tabs out to create new windows
-        // https://github.com/nikitabobko/AeroSpace/issues/1001
-        if isLeftMouseButtonDown { return nil }
-
         if let window = try AxWindow.new(windowId: id, axWindow, nsApp, job) {
             self[id] = window
             return window
@@ -369,6 +378,11 @@ extension [UInt32: AxWindow] {
             return nil
         }
     }
+}
+
+private func newKeepAliveRunLoopSource() -> CFRunLoopSource {
+    var context = unsafe CFRunLoopSourceContext()
+    return unsafe CFRunLoopSourceCreate(nil, 0, &context).orDie()
 }
 
 private func setFrame(_ window: AXUIElement, _ topLeft: CGPoint?, _ size: CGSize?, _ job: RunLoopJob) throws {

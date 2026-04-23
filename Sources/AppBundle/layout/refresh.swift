@@ -61,6 +61,7 @@ func runHeavyCompleteRefreshSession(
 func runLightSession<T>(
     _ event: RefreshSessionEvent,
     _: RunSessionGuard,
+    scheduleFollowupRefresh: Bool = true,
     body: @MainActor () async throws -> T,
 ) async throws -> T {
     let state = signposter.beginInterval(#function, "event: \(event) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
@@ -86,7 +87,9 @@ func runLightSession<T>(
             if focusBefore != focusAfter {
                 focusAfter?.nativeFocus() // syncFocusToMacOs
             }
-            scheduleCancellableCompleteRefreshSession(event)
+            if scheduleFollowupRefresh {
+                scheduleCancellableCompleteRefreshSession(event)
+            }
             return result
         }
     }
@@ -140,12 +143,21 @@ private func refresh() async throws {
     Workspace.garbageCollectUnusedWorkspaces()
 }
 
-func refreshObs(_: AXObserver, _: AXUIElement, notif: CFString, _: UnsafeMutableRawPointer?) {
-    let notif = notif as String
-    Task { @MainActor in
-        if !TrayMenuModel.shared.isEnabled { return }
-        scheduleCancellableCompleteRefreshSession(.ax(notif))
+@MainActor
+func refreshApp(pid: pid_t) async throws {
+    let frontmostAppBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    let (app, aliveWindowIdsArray) = try await MacApp.refreshAppAndGetAliveWindowIds(pid: pid, frontmostAppBundleId: frontmostAppBundleId)
+    let aliveWindowIds = aliveWindowIdsArray.toSet()
+
+    for window in MacWindow.allWindows where window.macApp.pid == pid && !aliveWindowIds.contains(window.windowId) {
+        window.garbageCollect(skipClosedWindowsCache: false)
     }
+    if let app {
+        for windowId in aliveWindowIds {
+            try await MacWindow.getOrRegister(windowId: windowId, macApp: app)
+        }
+    }
+    Workspace.garbageCollectUnusedWorkspaces()
 }
 
 enum OptimalHideCorner {

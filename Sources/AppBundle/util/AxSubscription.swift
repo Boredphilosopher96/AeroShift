@@ -24,27 +24,53 @@ final class AxSubscription {
         }
     }
 
+    static func bulkSubscribeDetailed(
+        _ nsApp: NSRunningApplication,
+        _ ax: AXUIElement,
+        _ job: RunLoopJob,
+        _ handlerToNotifKeyMapping: HandlerToNotifKeyMapping,
+    ) throws -> ObserverRegistrationResult {
+        var result: [AxSubscription] = []
+        var visitedNotifKeys: Set<String> = []
+        var requestedNotifications: [String] = []
+        var failedNotifications: [String] = []
+        for unsafe (handler, notifKeys) in unsafe handlerToNotifKeyMapping {
+            try job.checkCancellation()
+            guard let obs = unsafe AXObserver.new(nsApp.processIdentifier, handler) else {
+                failedNotifications.append(contentsOf: notifKeys)
+                continue
+            }
+            let subscription = AxSubscription(obs: obs, ax: ax)
+            var hasRegistration = false
+            for key: String in notifKeys {
+                try job.checkCancellation()
+                assert(visitedNotifKeys.insert(key).inserted)
+                requestedNotifications.append(key)
+                if try subscription.subscribe(key) {
+                    hasRegistration = true
+                } else {
+                    failedNotifications.append(key)
+                }
+            }
+            if hasRegistration {
+                CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(obs), .defaultMode)
+                result.append(subscription)
+            }
+        }
+        return ObserverRegistrationResult(
+            subscriptions: result,
+            requestedNotifications: requestedNotifications,
+            failedNotifications: failedNotifications,
+        )
+    }
+
     static func bulkSubscribe(
         _ nsApp: NSRunningApplication,
         _ ax: AXUIElement,
         _ job: RunLoopJob,
         _ handlerToNotifKeyMapping: HandlerToNotifKeyMapping,
     ) throws -> [AxSubscription] {
-        var result: [AxSubscription] = []
-        var visitedNotifKeys: Set<String> = []
-        for unsafe (handler, notifKeys) in unsafe handlerToNotifKeyMapping {
-            try job.checkCancellation()
-            guard let obs = unsafe AXObserver.new(nsApp.processIdentifier, handler) else { return [] }
-            let subscription = AxSubscription(obs: obs, ax: ax)
-            for key: String in notifKeys {
-                try job.checkCancellation()
-                assert(visitedNotifKeys.insert(key).inserted)
-                if try !subscription.subscribe(key) { return [] }
-            }
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(obs), .defaultMode)
-            result.append(subscription)
-        }
-        return result
+        try unsafe bulkSubscribeDetailed(nsApp, ax, job, handlerToNotifKeyMapping).subscriptions
     }
 
     deinit {
