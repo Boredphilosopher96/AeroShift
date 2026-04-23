@@ -280,11 +280,10 @@ fi
 description = "Publish generated Homebrew casks to the Homebrew tap repository"
 run = """
 set -euo pipefail
-source ./script/setup.sh
 
-tap_repo="${AEROSHIFT_HOMEBREW_TAP_REPO:-${homebrew_tap_owner}/${homebrew_tap_repo_name}}"
+tap_repo="${AEROSHIFT_HOMEBREW_TAP_REPO:-Boredphilosopher96/homebrew-aeroshift}"
 tap_branch="${AEROSHIFT_HOMEBREW_TAP_BRANCH:-main}"
-default_cask_files=".release/${primary_cask_name}.rb"
+default_cask_files=".release/aeroshift.rb"
 cask_files="${AEROSHIFT_HOMEBREW_TAP_CASK_FILES:-$default_cask_files}"
 commit_message="${AEROSHIFT_HOMEBREW_TAP_COMMIT_MESSAGE:-Update Homebrew casks for ${AEROSHIFT_RELEASE_TAG:-${AEROSHIFT_BUILD_VERSION:-release}}}"
 dry_run="${AEROSHIFT_HOMEBREW_TAP_DRY_RUN:-0}"
@@ -296,9 +295,7 @@ fi
 
 cleanup_files=()
 cleanup() {
-  if [ "${#cleanup_files[@]}" -gt 0 ]; then
-    rm -f "${cleanup_files[@]}"
-  fi
+  rm -f "${cleanup_files[@]}" 2>/dev/null || true
 }
 trap cleanup EXIT
 
