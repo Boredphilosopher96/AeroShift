@@ -51,6 +51,9 @@ enum ObserverIngress {
         timestampNs: UInt64 = DispatchTime.now().uptimeNanoseconds,
     ) {
         let mouseStateAtEventTime = kind == .leftMouseUp ? false : isLeftMouseButtonDown
+        let leftMouseUpContext = kind == .leftMouseUp
+            ? LeftMouseUpContext(monitorTopLeftCorner: mouseLocation.monitorApproximation.rect.topLeftCorner)
+            : nil
         ObserverPlanner.shared.publish(
             .init(
                 kind: kind,
@@ -58,6 +61,7 @@ enum ObserverIngress {
                 windowId: windowId,
                 timestampNs: timestampNs,
                 isLeftMouseButtonDown: mouseStateAtEventTime,
+                leftMouseUpContext: leftMouseUpContext,
             ),
         )
     }

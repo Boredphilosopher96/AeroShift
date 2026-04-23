@@ -25,12 +25,37 @@ enum ObserverIngressEventKind: String, Sendable, CaseIterable {
     case observerDegraded
 }
 
+struct LeftMouseUpContext: Sendable, Hashable, CustomStringConvertible {
+    let monitorTopLeftCorner: CGPoint
+
+    var description: String {
+        "monitorTopLeftCorner=(\(monitorTopLeftCorner.x),\(monitorTopLeftCorner.y))"
+    }
+}
+
 struct ObserverIngressEvent: Sendable, Hashable {
     let kind: ObserverIngressEventKind
     let pid: pid_t?
     let windowId: UInt32?
     let timestampNs: UInt64
     let isLeftMouseButtonDown: Bool
+    let leftMouseUpContext: LeftMouseUpContext?
+
+    init(
+        kind: ObserverIngressEventKind,
+        pid: pid_t?,
+        windowId: UInt32?,
+        timestampNs: UInt64,
+        isLeftMouseButtonDown: Bool,
+        leftMouseUpContext: LeftMouseUpContext? = nil,
+    ) {
+        self.kind = kind
+        self.pid = pid
+        self.windowId = windowId
+        self.timestampNs = timestampNs
+        self.isLeftMouseButtonDown = isLeftMouseButtonDown
+        self.leftMouseUpContext = leftMouseUpContext
+    }
 }
 
 enum PlannerFullRefreshReason: Sendable, Hashable, CustomStringConvertible {
@@ -56,21 +81,21 @@ enum PlannerFullRefreshReason: Sendable, Hashable, CustomStringConvertible {
 enum PlannerIntent: Sendable, Hashable, CustomStringConvertible {
     case refreshApp(pid_t)
     case fullRefresh(PlannerFullRefreshReason)
-    case mouseMove(UInt32)
-    case mouseResize(UInt32)
+    case mouseMove(UInt32, pid_t?)
+    case mouseResize(UInt32, pid_t?)
     case resetManipulatedMouse
     case handleHideApp(pid_t)
-    case syncMonitorFocus
+    case syncMonitorFocus(LeftMouseUpContext?)
 
     var description: String {
         switch self {
             case .refreshApp(let pid): "refreshApp(\(pid))"
             case .fullRefresh(let reason): "fullRefresh(\(reason))"
-            case .mouseMove(let windowId): "mouseMove(\(windowId))"
-            case .mouseResize(let windowId): "mouseResize(\(windowId))"
+            case .mouseMove(let windowId, let pid): "mouseMove(\(windowId), pid:\(pid.prettyDescription))"
+            case .mouseResize(let windowId, let pid): "mouseResize(\(windowId), pid:\(pid.prettyDescription))"
             case .resetManipulatedMouse: "resetManipulatedMouse"
             case .handleHideApp(let pid): "handleHideApp(\(pid))"
-            case .syncMonitorFocus: "syncMonitorFocus"
+            case .syncMonitorFocus(let context): "syncMonitorFocus(\(context?.description ?? "nil"))"
         }
     }
 }
@@ -98,7 +123,7 @@ struct ObserverPlannerCore: Sendable {
         switch event.kind {
             case .leftMouseUp:
                 immediateIntents.append(.resetManipulatedMouse)
-                immediateIntents.append(.syncMonitorFocus)
+                immediateIntents.append(.syncMonitorFocus(event.leftMouseUpContext))
                 for pid in uncertainPids {
                     immediateIntents.append(.refreshApp(pid))
                 }
@@ -182,10 +207,10 @@ struct ObserverPlannerCore: Sendable {
         defer { geometryIntents.removeAll() }
         return geometryIntents.map { windowId, pending in
             switch pending {
-                case .mouseMove:
-                    .mouseMove(windowId)
-                case .mouseResize:
-                    .mouseResize(windowId)
+                case .mouseMove(let pid):
+                    .mouseMove(windowId, pid)
+                case .mouseResize(let pid):
+                    .mouseResize(windowId, pid)
             }
         }
     }
@@ -252,8 +277,8 @@ struct ObserverPlannerCore: Sendable {
             switch (intent, event.windowId, event.pid) {
                 case (_, let windowId?, _):
                     let plannerIntent: PlannerIntent = switch intent {
-                        case .mouseMove: .mouseMove(windowId)
-                        case .mouseResize: .mouseResize(windowId)
+                        case .mouseMove(let pid): .mouseMove(windowId, pid)
+                        case .mouseResize(let pid): .mouseResize(windowId, pid)
                     }
                     immediateIntents.append(plannerIntent)
                 case (_, nil, let pid?):
