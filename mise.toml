@@ -89,7 +89,18 @@ set -euo pipefail
 
 [tasks.security]
 description = "Run dependency security checks"
-run = 'osv-scanner scan source -L "$PWD/Gemfile.lock"'
+depends = ["bundle-install"]
+run = """
+set -euo pipefail
+tmp_dir="$(mktemp -d /private/tmp/aeroshift-security.XXXXXX)"
+cleanup() {
+  rm -rf "$tmp_dir"
+}
+trap cleanup EXIT
+cp Gemfile "$tmp_dir/Gemfile"
+bundle lock --gemfile "$tmp_dir/Gemfile" --lockfile "$tmp_dir/Gemfile.lock"
+osv-scanner scan source -L "$tmp_dir/Gemfile.lock"
+"""
 
 [tasks.docs]
 description = "Build the website and man pages"

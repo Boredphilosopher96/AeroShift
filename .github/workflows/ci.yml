@@ -54,5 +54,5 @@ jobs:
           install: false
           cache: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
-      - run: mise install ruby github:cli/cli github:google/osv-scanner github:rhysd/actionlint
-      - run: mise run --skip-tools security
+      - run: mise install
+      - run: mise run security
