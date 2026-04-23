@@ -1,5 +1,8 @@
 name: close-third-party-issues
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   issues:
     types: [opened]
@@ -11,22 +14,17 @@ jobs:
     permissions:
       issues: write
     steps:
-    - name: Close third party issues
-      run: |
-        set -e # Exit if one of commands exit with non-zero exit code
-        set -u # Treat unset variables and parameters other than the special parameters ‘@’ or ‘*’ as an error
-        set -o pipefail # Any command failed in the pipe fails the whole pipe
-
-        author="$(gh issue view "$ISSUE" --json author --jq '.author.login')"
-
-        close() {
-          gh issue edit "$ISSUE" --add-label bin
-          gh issue close "$ISSUE" --comment "Please don't open issues directly on this fork. Use GitHub Discussions instead: https://github.com/Boredphilosopher96/Aeroshift/discussions . This repository is an unofficial Aeroshift fork of AeroSpace."
-          gh issue lock "$ISSUE"
-        }
-
-        test "$author" = Boredphilosopher96 || close
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GH_REPO: ${{ github.repository }}
-        ISSUE: ${{ github.event.issue.number }}
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+        with:
+          version: 2026.4.18
+          install: false
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - run: mise install
+      - name: Close third party issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: mise run close-third-party-issues

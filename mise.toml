@@ -49,6 +49,24 @@ fish --version
 description = "Lint GitHub Actions workflows"
 run = "actionlint .github/workflows/*.yml"
 
+[tasks.close-third-party-issues]
+hide = true
+description = "Close issues that are opened directly on the fork"
+run = """
+set -euo pipefail
+if [ -z "${ISSUE:-}" ]; then
+  echo "ISSUE is required" >&2
+  exit 1
+fi
+author="$(gh issue view "$ISSUE" --json author --jq '.author.login')"
+if [ "$author" = "Boredphilosopher96" ]; then
+  exit 0
+fi
+gh issue edit "$ISSUE" --add-label bin
+gh issue close "$ISSUE" --comment "Please don't open issues directly on this fork. Use GitHub Discussions instead: https://github.com/Boredphilosopher96/Aeroshift/discussions . This repository is an unofficial Aeroshift fork of AeroSpace."
+gh issue lock "$ISSUE"
+"""
+
 [tasks.gha-select-xcode]
 hide = true
 description = "Select the expected Xcode version on GitHub-hosted macOS runners"
@@ -145,6 +163,42 @@ bump_type="${RELEASE_TYPE:-patch}"
 bash ./script/next-release-version.sh "$bump_type"
 """
 
+[tasks.release-bundle-metadata]
+description = "Compute the release workflow metadata"
+run = """
+set -euo pipefail
+commit_sha="$(git rev-parse HEAD)"
+bump_type="${RELEASE_TYPE:-patch}"
+if test "${GITHUB_EVENT_NAME:-}" != "workflow_dispatch"; then
+  bump_type=patch
+fi
+build_version="$(RELEASE_TYPE="$bump_type" mise run release-next-version)"
+release_tag="v${build_version}"
+release_zip_name="Aeroshift-v${build_version}.zip"
+github_server_url="${GITHUB_SERVER_URL:-https://github.com}"
+github_repository="${GITHUB_REPOSITORY:-Boredphilosopher96/Aeroshift}"
+artifact_name="release-bundles-${build_version}"
+release_page_url="${github_server_url}/${github_repository}/releases/tag/${release_tag}"
+release_zip_url="${github_server_url}/${github_repository}/releases/download/${release_tag}/${release_zip_name}"
+
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  output_target="$GITHUB_OUTPUT"
+else
+  output_target=/dev/stdout
+fi
+
+{
+  printf 'artifact_name=%s\n' "$artifact_name"
+  printf 'build_version=%s\n' "$build_version"
+  printf 'commit_sha=%s\n' "$commit_sha"
+  printf 'is_release=true\n'
+  printf 'release_page_url=%s\n' "$release_page_url"
+  printf 'release_tag=%s\n' "$release_tag"
+  printf 'release_zip_name=%s\n' "$release_zip_name"
+  printf 'release_zip_url=%s\n' "$release_zip_url"
+} >> "$output_target"
+"""
+
 [tasks.release-casks-github-url]
 description = "Regenerate release casks to point at GitHub release assets"
 run = """
@@ -220,4 +274,89 @@ else
     --title "$release_title" \
     --notes "$release_notes"
 fi
+"""
+
+[tasks.release-publish-homebrew-tap]
+description = "Publish generated Homebrew casks to the Homebrew tap repository"
+run = """
+set -euo pipefail
+source ./script/setup.sh
+
+tap_repo="${AEROSHIFT_HOMEBREW_TAP_REPO:-${homebrew_tap_owner}/${homebrew_tap_repo_name}}"
+tap_branch="${AEROSHIFT_HOMEBREW_TAP_BRANCH:-main}"
+default_cask_files=".release/${primary_cask_name}.rb"
+cask_files="${AEROSHIFT_HOMEBREW_TAP_CASK_FILES:-$default_cask_files}"
+commit_message="${AEROSHIFT_HOMEBREW_TAP_COMMIT_MESSAGE:-Update Homebrew casks for ${AEROSHIFT_RELEASE_TAG:-${AEROSHIFT_BUILD_VERSION:-release}}}"
+dry_run="${AEROSHIFT_HOMEBREW_TAP_DRY_RUN:-0}"
+
+if [ "$dry_run" != "1" ] && [ -z "${GH_TOKEN:-}" ]; then
+  echo "GH_TOKEN is required to publish Homebrew tap casks" >&2
+  exit 1
+fi
+
+cleanup_files=()
+cleanup() {
+  if [ "${#cleanup_files[@]}" -gt 0 ]; then
+    rm -f "${cleanup_files[@]}"
+  fi
+}
+trap cleanup EXIT
+
+while IFS= read -r cask_file; do
+  if [ -z "$cask_file" ]; then
+    continue
+  fi
+  if ! test -f "$cask_file"; then
+    echo "Missing Homebrew tap cask asset: $cask_file" >&2
+    exit 1
+  fi
+
+  cask_file_name="$(basename "$cask_file")"
+  repo_path="Casks/$cask_file_name"
+  desired_content="$(cat "$cask_file")"
+  existing_error_file="$(mktemp /private/tmp/aeroshift-tap-error.XXXXXX)"
+  cleanup_files+=("$existing_error_file")
+  existing_content=''
+  existing_sha=''
+
+  if existing_json="$(gh api "repos/$tap_repo/contents/$repo_path?ref=$tap_branch" 2> "$existing_error_file")"; then
+    existing_sha="$(printf '%s' "$existing_json" | ruby -rjson -e 'data = JSON.parse(STDIN.read); print data.fetch("sha", "")')"
+    existing_content="$(printf '%s' "$existing_json" | ruby -rjson -e 'data = JSON.parse(STDIN.read); print data.fetch("content", "").delete("\n").unpack1("m0")')"
+  else
+    if ! grep -q 'HTTP 404' "$existing_error_file"; then
+      cat "$existing_error_file" >&2
+      exit 1
+    fi
+  fi
+
+  if [ "$existing_content" = "$desired_content" ]; then
+    echo "Homebrew tap already up to date for $repo_path"
+    continue
+  fi
+
+  if [ "$dry_run" = "1" ]; then
+    printf 'tap_repo=%s\n' "$tap_repo"
+    printf 'tap_branch=%s\n' "$tap_branch"
+    printf 'tap_path=%s\n' "$repo_path"
+    printf 'tap_commit_message=%s\n' "$commit_message"
+    printf 'tap_existing_sha=%s\n' "$existing_sha"
+    continue
+  fi
+
+  content_base64="$(ruby -e 'print [File.binread(ARGV[0])].pack("m0")' "$cask_file")"
+  api_args=(
+    --method PUT
+    "repos/$tap_repo/contents/$repo_path"
+    -f message="$commit_message"
+    -f content="$content_base64"
+    -f branch="$tap_branch"
+  )
+  if [ -n "$existing_sha" ]; then
+    api_args+=(-f sha="$existing_sha")
+  fi
+  gh api "${api_args[@]}" > /dev/null
+  echo "Published $repo_path to $tap_repo@$tap_branch"
+done <<EOF
+${cask_files}
+EOF
 """
