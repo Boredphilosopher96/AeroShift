@@ -143,6 +143,7 @@ final class ObserverPlanner: @unchecked Sendable {
         queue.async { [self] in
             let state = signposter.beginInterval(#function, "kind: \(event.kind.rawValue) pid: \(event.pid.prettyDescription) windowId: \(event.windowId.prettyDescription)")
             defer { signposter.endInterval(#function, state) }
+            drainReadyLanes(at: event.timestampNs)
             core.ingest(event, isLeftMouseButtonDown: isLeftMouseButtonDown)
             deliver(core.drainImmediate())
             rescheduleShortTimer()
@@ -184,15 +185,18 @@ final class ObserverPlanner: @unchecked Sendable {
         return timer
     }
 
+    private func drainReadyLanes(at nowNs: UInt64) {
+        deliver(core.drainShortIfReady(at: nowNs))
+        deliver(core.drainGeometryIfReady(at: nowNs))
+    }
+
     private func drainShortLane() {
-        let intents = core.drainShortIfReady(at: DispatchTime.now().uptimeNanoseconds)
-        deliver(intents)
+        drainReadyLanes(at: DispatchTime.now().uptimeNanoseconds)
         rescheduleShortTimer()
     }
 
     private func drainGeometryLane() {
-        let intents = core.drainGeometryIfReady(at: DispatchTime.now().uptimeNanoseconds)
-        deliver(intents)
+        drainReadyLanes(at: DispatchTime.now().uptimeNanoseconds)
         rescheduleGeometryTimer()
     }
 }

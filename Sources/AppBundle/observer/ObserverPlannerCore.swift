@@ -2,8 +2,8 @@ import Collections
 import Common
 import Foundation
 
-let observerPlannerShortDebounceNs: UInt64 = 8_000_000
-let observerPlannerGeometryDebounceNs: UInt64 = 16_000_000
+let observerPlannerShortDebounceNs: UInt64 = 2_000_000
+let observerPlannerGeometryDebounceNs: UInt64 = 4_000_000
 let observerPlannerDegradedObserverFailureThreshold = 3
 
 enum ObserverIngressEventKind: String, Sendable, CaseIterable {
@@ -84,13 +84,15 @@ struct ObserverPlannerCore: Sendable {
     private(set) var shortDeadlineNs: UInt64? = nil
     private(set) var geometryDeadlineNs: UInt64? = nil
 
-    private var shortRefreshPids: OrderedSet<pid_t> = []
-    private var shortFullRefreshReason: PlannerFullRefreshReason? = nil
+    private var shortTrailingRefreshes: OrderedDictionary<pid_t, UInt64> = [:]
+    private var shortCooldownDeadlines: [pid_t: UInt64] = [:]
+    private var shortFullRefresh: (reason: PlannerFullRefreshReason, deadlineNs: UInt64)? = nil
     private var geometryIntents: OrderedDictionary<UInt32, PendingGeometryIntent> = [:]
     private var uncertainPids: OrderedSet<pid_t> = []
     private var degradedObserverFailures: [pid_t: Int] = [:]
 
     mutating func ingest(_ event: ObserverIngressEvent, isLeftMouseButtonDown: Bool) {
+        cleanupExpiredShortCooldowns(at: event.timestampNs)
         switch event.kind {
             case .leftMouseUp:
                 immediateIntents.append(.resetManipulatedMouse)
@@ -107,10 +109,15 @@ struct ObserverPlannerCore: Sendable {
                     queueShortFullRefresh(.plannerConfidenceLoss("didHideApplication missing pid"), at: event.timestampNs)
                 }
 
-            case .axWindowCreated, .axFocusedWindowChanged, .axWindowDestroyed, .axWindowDeminiaturized,
-                 .axWindowMiniaturized, .didLaunchApplication, .didActivateApplication, .didUnhideApplication,
+            case .axWindowCreated, .axFocusedWindowChanged, .didActivateApplication, .didUnhideApplication:
+                queueLeadingEdgeRefresh(event.pid, at: event.timestampNs, fallback: "\(event.kind.rawValue) missing pid")
+                if isLeftMouseButtonDown, let pid = event.pid {
+                    uncertainPids.append(pid)
+                }
+
+            case .axWindowDestroyed, .axWindowDeminiaturized, .axWindowMiniaturized, .didLaunchApplication,
                  .didTerminateApplication:
-                markAppRefresh(event.pid, at: event.timestampNs, fallback: "\(event.kind.rawValue) missing pid")
+                queueTrailingRefresh(event.pid, at: event.timestampNs, fallback: "\(event.kind.rawValue) missing pid")
                 if isLeftMouseButtonDown, let pid = event.pid {
                     uncertainPids.append(pid)
                 }
@@ -125,8 +132,7 @@ struct ObserverPlannerCore: Sendable {
                 if failures >= observerPlannerDegradedObserverFailureThreshold {
                     queueShortFullRefresh(.degradedObserver(pid), at: event.timestampNs)
                 } else {
-                    shortRefreshPids.append(pid)
-                    armShortDeadline(event.timestampNs)
+                    queueTrailingRefresh(pid, at: event.timestampNs)
                 }
 
             case .activeSpaceDidChange:
@@ -151,14 +157,21 @@ struct ObserverPlannerCore: Sendable {
 
     mutating func drainShortIfReady(at nowNs: UInt64) -> [PlannerIntent] {
         guard let shortDeadlineNs, shortDeadlineNs <= nowNs else { return [] }
-        self.shortDeadlineNs = nil
-        defer { shortRefreshPids.removeAll() }
-        if let shortFullRefreshReason {
-            self.shortFullRefreshReason = nil
-            shortRefreshPids.removeAll()
-            return [.fullRefresh(shortFullRefreshReason)]
+        if let shortFullRefresh, shortFullRefresh.deadlineNs <= nowNs {
+            self.shortFullRefresh = nil
+            shortTrailingRefreshes.removeAll()
+            cleanupExpiredShortCooldowns(at: nowNs)
+            recomputeShortDeadline()
+            return [.fullRefresh(shortFullRefresh.reason)]
         }
-        return shortRefreshPids.map { .refreshApp($0) }
+
+        let readyPids = shortTrailingRefreshes.compactMap { pid, deadlineNs in deadlineNs <= nowNs ? pid : nil }
+        for pid in readyPids {
+            _ = shortTrailingRefreshes.removeValue(forKey: pid)
+        }
+        cleanupExpiredShortCooldowns(at: nowNs)
+        recomputeShortDeadline()
+        return readyPids.map { .refreshApp($0) }
     }
 
     mutating func drainGeometryIfReady(at nowNs: UInt64) -> [PlannerIntent] {
@@ -175,22 +188,54 @@ struct ObserverPlannerCore: Sendable {
         }
     }
 
-    var pendingShortRefreshPidCount: Int { shortRefreshPids.count }
+    var pendingShortRefreshPidCount: Int { shortTrailingRefreshes.count }
     var pendingGeometryIntentCount: Int { geometryIntents.count }
     var pendingUncertainPidCount: Int { uncertainPids.count }
 
-    private mutating func markAppRefresh(_ pid: pid_t?, at timestampNs: UInt64, fallback: String) {
-        if let pid {
-            shortRefreshPids.append(pid)
-            armShortDeadline(timestampNs)
-        } else {
+    private mutating func queueLeadingEdgeRefresh(_ pid: pid_t?, at timestampNs: UInt64, fallback: String) {
+        guard let pid else {
             queueShortFullRefresh(.plannerConfidenceLoss(fallback), at: timestampNs)
+            return
+        }
+        if let cooldownDeadline = shortCooldownDeadlines[pid], cooldownDeadline > timestampNs {
+            queueTrailingRefresh(pid, deadlineNs: cooldownDeadline)
+        } else {
+            immediateIntents.append(.refreshApp(pid))
+            shortCooldownDeadlines[pid] = timestampNs + observerPlannerShortDebounceNs
         }
     }
 
+    private mutating func queueTrailingRefresh(_ pid: pid_t?, at timestampNs: UInt64, fallback: String) {
+        guard let pid else {
+            queueShortFullRefresh(.plannerConfidenceLoss(fallback), at: timestampNs)
+            return
+        }
+        queueTrailingRefresh(pid, at: timestampNs)
+    }
+
+    private mutating func queueTrailingRefresh(_ pid: pid_t, at timestampNs: UInt64) {
+        let cooldownDeadline = max(shortCooldownDeadlines[pid] ?? 0, timestampNs + observerPlannerShortDebounceNs)
+        shortCooldownDeadlines[pid] = cooldownDeadline
+        queueTrailingRefresh(pid, deadlineNs: cooldownDeadline)
+    }
+
+    private mutating func queueTrailingRefresh(_ pid: pid_t, deadlineNs: UInt64) {
+        if let existing = shortTrailingRefreshes[pid] {
+            shortTrailingRefreshes[pid] = min(existing, deadlineNs)
+        } else {
+            shortTrailingRefreshes[pid] = deadlineNs
+        }
+        recomputeShortDeadline()
+    }
+
     private mutating func queueShortFullRefresh(_ reason: PlannerFullRefreshReason, at timestampNs: UInt64) {
-        shortFullRefreshReason = shortFullRefreshReason ?? reason
-        armShortDeadline(timestampNs)
+        let deadlineNs = timestampNs + observerPlannerShortDebounceNs
+        if let shortFullRefresh {
+            self.shortFullRefresh = (shortFullRefresh.reason, min(shortFullRefresh.deadlineNs, deadlineNs))
+        } else {
+            shortFullRefresh = (reason, deadlineNs)
+        }
+        recomputeShortDeadline()
     }
 
     private mutating func queueGeometryIntent(
@@ -201,20 +246,37 @@ struct ObserverPlannerCore: Sendable {
         if isLeftMouseButtonDown, let pid = event.pid {
             uncertainPids.append(pid)
         }
+        if isLeftMouseButtonDown {
+            switch (intent, event.windowId, event.pid) {
+                case (_, let windowId?, _):
+                    let plannerIntent: PlannerIntent = switch intent {
+                        case .mouseMove: .mouseMove(windowId)
+                        case .mouseResize: .mouseResize(windowId)
+                    }
+                    immediateIntents.append(plannerIntent)
+                case (_, nil, let pid?):
+                    immediateIntents.append(.refreshApp(pid))
+                case (_, nil, nil):
+                    queueShortFullRefresh(.plannerConfidenceLoss("\(event.kind.rawValue) missing pid/windowId"), at: event.timestampNs)
+            }
+            return
+        }
         if let windowId = event.windowId {
             geometryIntents[windowId] = intent
             armGeometryDeadline(event.timestampNs)
         } else if let pid = event.pid {
-            shortRefreshPids.append(pid)
-            armShortDeadline(event.timestampNs)
+            queueTrailingRefresh(pid, at: event.timestampNs)
         } else {
             queueShortFullRefresh(.plannerConfidenceLoss("\(event.kind.rawValue) missing pid/windowId"), at: event.timestampNs)
         }
     }
 
-    private mutating func armShortDeadline(_ timestampNs: UInt64) {
-        shortDeadlineNs = shortDeadlineNs.map { min($0, timestampNs + observerPlannerShortDebounceNs) }
-            ?? (timestampNs + observerPlannerShortDebounceNs)
+    private mutating func cleanupExpiredShortCooldowns(at nowNs: UInt64) {
+        shortCooldownDeadlines = shortCooldownDeadlines.filter { _, deadlineNs in deadlineNs > nowNs }
+    }
+
+    private mutating func recomputeShortDeadline() {
+        shortDeadlineNs = ([shortFullRefresh?.deadlineNs] + shortTrailingRefreshes.values.map(id)).compactMap(id).min()
     }
 
     private mutating func armGeometryDeadline(_ timestampNs: UInt64) {

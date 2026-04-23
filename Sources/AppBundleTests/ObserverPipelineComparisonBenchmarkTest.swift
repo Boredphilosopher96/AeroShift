@@ -50,6 +50,7 @@ private enum BenchmarkScenario: String, CaseIterable {
     case createStorm
     case mixedFocusCreate
     case geometryStorm
+    case interactiveGeometryStorm
 
     func makeWorkload(rawEvents: Int, appCount: Int) -> [BenchmarkEvent] {
         let spacingNs: UInt64 = 100_000 // 0.1 ms between raw events
@@ -78,6 +79,15 @@ private enum BenchmarkScenario: String, CaseIterable {
                         windowId: windowId,
                         timestampNs: timestampNs,
                         mouseDown: false
+                    )
+                case .interactiveGeometryStorm:
+                    BenchmarkEvent(
+                        id: index,
+                        kind: index.isMultiple(of: 2) ? .axWindowMoved : .axWindowResized,
+                        pid: pid,
+                        windowId: windowId,
+                        timestampNs: timestampNs,
+                        mouseDown: true
                     )
             }
         }
@@ -138,12 +148,13 @@ private struct PlannerObserverPipeline: BenchmarkPipeline {
     private var pendingLeftMouseUpEvents: [UInt64] = []
 
     mutating func ingest(_ event: BenchmarkEvent) {
+        drain(at: event.timestampNs)
         registerPending(event)
         core.ingest(
             .init(kind: event.kind, pid: event.pid, windowId: event.windowId, timestampNs: event.timestampNs),
             isLeftMouseButtonDown: event.mouseDown
         )
-        drain(at: event.timestampNs)
+        apply(core.drainImmediate(), at: event.timestampNs)
     }
 
     mutating func finish() {
