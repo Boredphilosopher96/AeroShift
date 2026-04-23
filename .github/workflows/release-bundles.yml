@@ -125,6 +125,13 @@ jobs:
           RELEASE_ZIP_NAME: ${{ needs.build-release-bundles.outputs.release_zip_name }}
         run: |
           set -euo pipefail
+          release_notes=$(cat <<EOF
+          Automated release bundle for main.
+
+          Commit: $COMMIT_SHA
+          Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          EOF
+          )
           assets=(
             ".release/${RELEASE_ZIP_NAME}"
             ".release/aeroshift.rb"
@@ -136,8 +143,5 @@ jobs:
             gh release create "$RELEASE_TAG" "${assets[@]}" \
               --target "$COMMIT_SHA" \
               --title "$RELEASE_TAG" \
-              --notes "Automated release bundle for main.
-
-Commit: $COMMIT_SHA
-Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              --notes "$release_notes"
           fi
