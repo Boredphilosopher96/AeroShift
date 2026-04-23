@@ -56,20 +56,15 @@ jobs:
         run: |
           set -euo pipefail
           commit_sha="$(git rev-parse HEAD)"
-          short_sha="$(printf '%s' "$commit_sha" | cut -c1-7)"
-          if test "$GITHUB_EVENT_NAME" = "workflow_dispatch"; then
-            build_version="$(bash ./script/next-release-version.sh "$RELEASE_TYPE")"
-            is_release=true
-            release_tag="v${build_version}"
-            release_page_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${release_tag}"
-            release_zip_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${release_tag}/Aeroshift-v${build_version}.zip"
-          else
-            build_version="0.0.0-main.${GITHUB_RUN_NUMBER}-${short_sha}-SNAPSHOT"
-            is_release=false
-            release_tag=""
-            release_page_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            release_zip_url=""
+          bump_type="${RELEASE_TYPE:-patch}"
+          if test "$GITHUB_EVENT_NAME" != "workflow_dispatch"; then
+            bump_type=patch
           fi
+          build_version="$(bash ./script/next-release-version.sh "$bump_type")"
+          is_release=true
+          release_tag="v${build_version}"
+          release_page_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${release_tag}"
+          release_zip_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${release_tag}/Aeroshift-v${build_version}.zip"
           release_zip_name="Aeroshift-v${build_version}.zip"
           echo "artifact_name=release-bundles-${build_version}" >> "$GITHUB_OUTPUT"
           echo "build_version=${build_version}" >> "$GITHUB_OUTPUT"

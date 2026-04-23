@@ -97,8 +97,9 @@ if [ -n "${AEROSHIFT_RELEASE_ZIP_URI:-}" ]; then
     echo "AEROSHIFT_BUILD_VERSION is required when AEROSHIFT_RELEASE_ZIP_URI is set" >&2
     exit 1
   fi
-  ./script/build-brew-cask.sh --cask-name aeroshift --zip-uri "$AEROSHIFT_RELEASE_ZIP_URI" --build-version "$AEROSHIFT_BUILD_VERSION"
-  ./script/build-brew-cask.sh --cask-name aeroshift-dev --zip-uri "$AEROSHIFT_RELEASE_ZIP_URI" --build-version "$AEROSHIFT_BUILD_VERSION"
+  local_release_zip=".release/Aeroshift-v${AEROSHIFT_BUILD_VERSION}.zip"
+  ./script/build-brew-cask.sh --cask-name aeroshift --zip-uri "$AEROSHIFT_RELEASE_ZIP_URI" --zip-sha-source "$local_release_zip" --build-version "$AEROSHIFT_BUILD_VERSION"
+  ./script/build-brew-cask.sh --cask-name aeroshift-dev --zip-uri "$AEROSHIFT_RELEASE_ZIP_URI" --zip-sha-source "$local_release_zip" --build-version "$AEROSHIFT_BUILD_VERSION"
 fi
 ./install-from-sources.sh --dont-rebuild
 """

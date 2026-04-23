@@ -3,12 +3,14 @@ cd "$(dirname "$0")/.."
 source ./script/setup.sh
 
 zip_uri='' # mandatory
+zip_sha_source='' # optional local file used to compute sha256 when zip_uri is remote
 cask_name='' # mandatory
 build_version="0.0.0-SNAPSHOT"
 while test $# -gt 0; do
     case $1 in
         --build-version) build_version="$2"; shift 2;;
         --zip-uri) zip_uri="$2"; shift 2;;
+        --zip-sha-source) zip_sha_source="$2"; shift 2;;
         --cask-name) cask_name="$2"; shift 2;;
         *) echo "Unknown arg $1"; exit 1;;
     esac
@@ -24,7 +26,13 @@ case "$cask_name" in
 esac
 
 zip_file=''
-if test -f "$zip_uri"; then
+if test -n "$zip_sha_source"; then
+    if ! test -f "$zip_sha_source"; then
+        echo "$zip_sha_source doesn't exist" > /dev/stderr
+        exit 1
+    fi
+    zip_file="$zip_sha_source"
+elif test -f "$zip_uri"; then
     zip_file=$zip_uri
     zip_uri="file://$(realpath "$zip_file")"
 elif grep -q '^http' <<< "$zip_uri"; then
