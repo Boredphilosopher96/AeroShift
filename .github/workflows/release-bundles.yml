@@ -36,18 +36,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - run: env # Debug
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.sha }}
           fetch-depth: 0
-      - run: ./.github/gh-actions-runner-xcode-select.sh
       - uses: jdx/mise-action@v4
         with:
           version: 2026.4.18
-          install: true
+          install: false
           cache: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
+      - run: mise install
+      - run: mise run gha-select-xcode
       - run: mise run doctor
       - id: bundle-version
         name: Compute bundle version
@@ -60,7 +60,7 @@ jobs:
           if test "$GITHUB_EVENT_NAME" != "workflow_dispatch"; then
             bump_type=patch
           fi
-          build_version="$(bash ./script/next-release-version.sh "$bump_type")"
+          build_version="$(RELEASE_TYPE="$bump_type" mise run release-next-version)"
           is_release=true
           release_tag="v${build_version}"
           release_page_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${release_tag}"
@@ -77,7 +77,6 @@ jobs:
       - name: mise run release-ci
         env:
           AEROSHIFT_BUILD_VERSION: ${{ steps.bundle-version.outputs.build_version }}
-          AEROSHIFT_RELEASE_ZIP_URI: ${{ steps.bundle-version.outputs.release_zip_url }}
         run: mise run release-ci
       - name: Upload xcodebuild log
         if: ${{ always() }}
@@ -94,13 +93,11 @@ jobs:
           name: ${{ steps.bundle-version.outputs.artifact_name }}
           path: |
             .release/${{ steps.bundle-version.outputs.release_zip_name }}
-            .release/aeroshift.rb
-            .release/aeroshift-dev.rb
           if-no-files-found: error
           retention-days: 14
   publish-release-bundles:
     name: publish-release-bundles
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     needs: build-release-bundles
     if: ${{ needs.build-release-bundles.result == 'success' && needs.build-release-bundles.outputs.is_release == 'true' }}
     # Configure required reviewers for the "release-bundles" environment in
@@ -111,33 +108,43 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.build-release-bundles.outputs.commit_sha }}
+      - uses: jdx/mise-action@v4
+        with:
+          version: 2026.4.18
+          install: false
+          cache: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - run: mise install ruby github:cli/cli
       - name: Download release bundle artifacts
         uses: actions/download-artifact@v5
         with:
           name: ${{ needs.build-release-bundles.outputs.artifact_name }}
           path: .release
-      - name: Publish GitHub release
+      - name: Publish release zip
         env:
-          COMMIT_SHA: ${{ needs.build-release-bundles.outputs.commit_sha }}
+          AEROSHIFT_RELEASE_ASSETS: |
+            .release/${{ needs.build-release-bundles.outputs.release_zip_name }}
+          AEROSHIFT_RELEASE_TAG: ${{ needs.build-release-bundles.outputs.release_tag }}
+          AEROSHIFT_RELEASE_TARGET: ${{ needs.build-release-bundles.outputs.commit_sha }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.build-release-bundles.outputs.release_tag }}
-          RELEASE_ZIP_NAME: ${{ needs.build-release-bundles.outputs.release_zip_name }}
-        run: |
-          set -euo pipefail
-          assets=(
-            ".release/${RELEASE_ZIP_NAME}"
-            ".release/aeroshift.rb"
-            ".release/aeroshift-dev.rb"
-          )
-          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
-          else
-            gh release create "$RELEASE_TAG" "${assets[@]}" \
-              --target "$COMMIT_SHA" \
-              --title "$RELEASE_TAG" \
-              --notes "Automated release bundle for main.
-
-Commit: $COMMIT_SHA
-Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          fi
+        run: mise run release-publish
+      - name: Generate release casks
+        env:
+          AEROSHIFT_BUILD_VERSION: ${{ needs.build-release-bundles.outputs.build_version }}
+          AEROSHIFT_RELEASE_ZIP_SHA_SOURCE: .release/${{ needs.build-release-bundles.outputs.release_zip_name }}
+          AEROSHIFT_RELEASE_ZIP_URI: ${{ needs.build-release-bundles.outputs.release_zip_url }}
+        run: mise run release-casks-github-url
+      - name: Publish release casks
+        env:
+          AEROSHIFT_RELEASE_ASSETS: |
+            .release/aeroshift.rb
+            .release/aeroshift-dev.rb
+          AEROSHIFT_RELEASE_TAG: ${{ needs.build-release-bundles.outputs.release_tag }}
+          AEROSHIFT_RELEASE_TARGET: ${{ needs.build-release-bundles.outputs.commit_sha }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: mise run release-publish
