@@ -62,6 +62,7 @@ func runLightSession<T>(
     _ event: RefreshSessionEvent,
     _: RunSessionGuard,
     scheduleFollowupRefresh: Bool = true,
+    normalizeLayoutAfterBody: Bool = false,
     body: @MainActor () async throws -> T,
 ) async throws -> T {
     let state = signposter.beginInterval(#function, "event: \(event) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
@@ -83,6 +84,9 @@ func runLightSession<T>(
 
             updateTrayText()
             SecureInputPanel.shared.refresh()
+            if normalizeLayoutAfterBody {
+                try await normalizeLayoutReason()
+            }
             try await layoutWorkspaces()
             if focusBefore != focusAfter {
                 focusAfter?.nativeFocus() // syncFocusToMacOs

@@ -32,7 +32,6 @@ final class AxSubscription {
     ) throws -> ObserverRegistrationResult {
         var result: [AxSubscription] = []
         var visitedNotifKeys: Set<String> = []
-        var requestedNotifications: [String] = []
         var failedNotifications: [String] = []
         for unsafe (handler, notifKeys) in unsafe handlerToNotifKeyMapping {
             try job.checkCancellation()
@@ -45,7 +44,6 @@ final class AxSubscription {
             for key: String in notifKeys {
                 try job.checkCancellation()
                 assert(visitedNotifKeys.insert(key).inserted)
-                requestedNotifications.append(key)
                 if try subscription.subscribe(key) {
                     hasRegistration = true
                 } else {
@@ -59,18 +57,8 @@ final class AxSubscription {
         }
         return ObserverRegistrationResult(
             subscriptions: result,
-            requestedNotifications: requestedNotifications,
             failedNotifications: failedNotifications,
         )
-    }
-
-    static func bulkSubscribe(
-        _ nsApp: NSRunningApplication,
-        _ ax: AXUIElement,
-        _ job: RunLoopJob,
-        _ handlerToNotifKeyMapping: HandlerToNotifKeyMapping,
-    ) throws -> [AxSubscription] {
-        try unsafe bulkSubscribeDetailed(nsApp, ax, job, handlerToNotifKeyMapping).subscriptions
     }
 
     deinit {

@@ -5,10 +5,8 @@ import Foundation
 
 struct ObserverRegistrationResult {
     let subscriptions: [AxSubscription]
-    let requestedNotifications: [String]
     let failedNotifications: [String]
 
-    var hasAnyRegistration: Bool { !subscriptions.isEmpty }
     var hasFailures: Bool { !failedNotifications.isEmpty }
 }
 
@@ -36,7 +34,7 @@ enum ObserverIngress {
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
-            queue: .main
+            queue: .main,
         ) { _ in
             publish(kind: .screenParametersChanged, pid: nil, windowId: nil)
         }
@@ -52,7 +50,16 @@ enum ObserverIngress {
         windowId: UInt32?,
         timestampNs: UInt64 = DispatchTime.now().uptimeNanoseconds,
     ) {
-        ObserverPlanner.shared.publish(.init(kind: kind, pid: pid, windowId: windowId, timestampNs: timestampNs))
+        let mouseStateAtEventTime = kind == .leftMouseUp ? false : isLeftMouseButtonDown
+        ObserverPlanner.shared.publish(
+            .init(
+                kind: kind,
+                pid: pid,
+                windowId: windowId,
+                timestampNs: timestampNs,
+                isLeftMouseButtonDown: mouseStateAtEventTime,
+            ),
+        )
     }
 
     static func publishRegistrationResult(
@@ -63,7 +70,7 @@ enum ObserverIngress {
         guard result.hasFailures else { return }
         let state = signposter.beginInterval(
             #function,
-            "pid: \(pid) windowId: \(windowId.prettyDescription) failed: \(result.failedNotifications.joined(separator: ","))"
+            "pid: \(pid) windowId: \(windowId.prettyDescription) failed: \(result.failedNotifications.joined(separator: ","))",
         )
         defer { signposter.endInterval(#function, state) }
         publish(kind: .observerDegraded, pid: pid, windowId: windowId)
@@ -111,8 +118,8 @@ private func observerIngressWindowResizedCallback(_: AXObserver, ax: AXUIElement
     ObserverIngress.publish(kind: notif.asObserverIngressEventKind().orDie(), pid: ax.processIdentifier, windowId: ax.containingWindowId())
 }
 
-private extension CFString {
-    func asObserverIngressEventKind() -> ObserverIngressEventKind? {
+extension CFString {
+    fileprivate func asObserverIngressEventKind() -> ObserverIngressEventKind? {
         switch self as String {
             case kAXWindowCreatedNotification:
                 .axWindowCreated

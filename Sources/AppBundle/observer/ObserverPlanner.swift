@@ -33,7 +33,7 @@ final class PlannerExecutor {
     private func execute(_ intent: PlannerIntent) async {
         switch intent {
             case .refreshApp(let pid):
-                await runPlannerSession(.ax("planner.refreshApp(\(pid))")) {
+                await runPlannerSession(.ax("planner.refreshApp(\(pid))"), normalizeLayoutAfterBody: true) {
                     try await refreshApp(pid: pid)
                 }
 
@@ -47,7 +47,7 @@ final class PlannerExecutor {
                         try await moveWithMouse(window)
                     }
                 } else {
-                    await runPlannerSession(.ax("planner.mouseMove.refresh(\(windowId))")) {
+                    await runPlannerSession(.ax("planner.mouseMove.refresh(\(windowId))"), normalizeLayoutAfterBody: true) {
                         try await refreshApp(pid: window.app.pid)
                     }
                 }
@@ -59,18 +59,18 @@ final class PlannerExecutor {
                         try await resizeWithMouse(window)
                     }
                 } else {
-                    await runPlannerSession(.ax("planner.mouseResize.refresh(\(windowId))")) {
+                    await runPlannerSession(.ax("planner.mouseResize.refresh(\(windowId))"), normalizeLayoutAfterBody: true) {
                         try await refreshApp(pid: window.app.pid)
                     }
                 }
 
             case .resetManipulatedMouse:
-                await runPlannerSession(.resetManipulatedWithMouse) {
+                await runPlannerSession(.resetManipulatedWithMouse, normalizeLayoutAfterBody: true) {
                     try await resetManipulatedWithMouseIfPossible(scheduleFollowupRefresh: false)
                 }
 
             case .handleHideApp(let pid):
-                await runPlannerSession(.globalObserver(NSWorkspace.didHideApplicationNotification.rawValue)) {
+                await runPlannerSession(.globalObserver(NSWorkspace.didHideApplicationNotification.rawValue), normalizeLayoutAfterBody: true) {
                     try await handleHideApplication(pid: pid)
                 }
 
@@ -81,11 +81,18 @@ final class PlannerExecutor {
 
     private func runPlannerSession(
         _ event: RefreshSessionEvent,
+        normalizeLayoutAfterBody: Bool = false,
         _ body: @escaping @MainActor () async throws -> (),
     ) async {
         guard let token: RunSessionGuard = .isServerEnabled else { return }
         do {
-            try await runLightSession(event, token, scheduleFollowupRefresh: false, body: body)
+            try await runLightSession(
+                event,
+                token,
+                scheduleFollowupRefresh: false,
+                normalizeLayoutAfterBody: normalizeLayoutAfterBody,
+                body: body,
+            )
         } catch let error as CancellationError {
             _ = error
         } catch {
@@ -144,7 +151,7 @@ final class ObserverPlanner: @unchecked Sendable {
             let state = signposter.beginInterval(#function, "kind: \(event.kind.rawValue) pid: \(event.pid.prettyDescription) windowId: \(event.windowId.prettyDescription)")
             defer { signposter.endInterval(#function, state) }
             drainReadyLanes(at: event.timestampNs)
-            core.ingest(event, isLeftMouseButtonDown: isLeftMouseButtonDown)
+            core.ingest(event)
             deliver(core.drainImmediate())
             rescheduleShortTimer()
             rescheduleGeometryTimer()

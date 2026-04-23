@@ -5,9 +5,9 @@ import XCTest
 final class ObserverPlannerCoreTest: XCTestCase {
     func testLeadingEdgeRefreshFiresImmediatelyAndQueuesTrailingRepair() {
         var core = ObserverPlannerCore()
-        core.ingest(event(.axWindowCreated, pid: 42, windowId: 100, at: 0), isLeftMouseButtonDown: false)
+        core.ingest(event(.axWindowCreated, pid: 42, windowId: 100, at: 0))
         assertEquals(core.drainImmediate(), [.refreshApp(42)])
-        core.ingest(event(.axFocusedWindowChanged, pid: 42, windowId: 100, at: 1), isLeftMouseButtonDown: false)
+        core.ingest(event(.axFocusedWindowChanged, pid: 42, windowId: 100, at: 1))
         assertEquals(core.drainImmediate(), [])
 
         assertEquals(core.pendingShortRefreshPidCount, 1)
@@ -17,8 +17,8 @@ final class ObserverPlannerCoreTest: XCTestCase {
 
     func testGeometryLaneCoalescesByWindowAndKeepsLatestIntent() {
         var core = ObserverPlannerCore()
-        core.ingest(event(.axWindowMoved, pid: 7, windowId: 200, at: 0), isLeftMouseButtonDown: false)
-        core.ingest(event(.axWindowResized, pid: 7, windowId: 200, at: 1), isLeftMouseButtonDown: false)
+        core.ingest(event(.axWindowMoved, pid: 7, windowId: 200, at: 0))
+        core.ingest(event(.axWindowResized, pid: 7, windowId: 200, at: 1))
 
         assertEquals(core.pendingGeometryIntentCount, 1)
         assertEquals(core.drainGeometryIfReady(at: observerPlannerGeometryDebounceNs - 1), [])
@@ -27,7 +27,7 @@ final class ObserverPlannerCoreTest: XCTestCase {
 
     func testInteractiveGeometryFiresImmediately() {
         var core = ObserverPlannerCore()
-        core.ingest(event(.axWindowMoved, pid: 7, windowId: 200, at: 0), isLeftMouseButtonDown: true)
+        core.ingest(event(.axWindowMoved, pid: 7, windowId: 200, at: 0, mouseDown: true))
 
         assertEquals(core.drainImmediate(), [.mouseMove(200)])
         assertEquals(core.pendingGeometryIntentCount, 0)
@@ -35,13 +35,13 @@ final class ObserverPlannerCoreTest: XCTestCase {
 
     func testImmediateLaneDrainsUncertainAppsOnLeftMouseUp() {
         var core = ObserverPlannerCore()
-        core.ingest(event(.axWindowCreated, pid: 1, windowId: 10, at: 0), isLeftMouseButtonDown: true)
+        core.ingest(event(.axWindowCreated, pid: 1, windowId: 10, at: 0, mouseDown: true))
         assertEquals(core.drainImmediate(), [.refreshApp(1)])
-        core.ingest(event(.axWindowResized, pid: 2, windowId: 20, at: 1), isLeftMouseButtonDown: true)
+        core.ingest(event(.axWindowResized, pid: 2, windowId: 20, at: 1, mouseDown: true))
         assertEquals(core.drainImmediate(), [.mouseResize(20)])
         assertEquals(core.pendingUncertainPidCount, 2)
 
-        core.ingest(event(.leftMouseUp, pid: nil, windowId: nil, at: 2), isLeftMouseButtonDown: false)
+        core.ingest(event(.leftMouseUp, pid: nil, windowId: nil, at: 2))
         assertEquals(
             core.drainImmediate(),
             [.resetManipulatedMouse, .syncMonitorFocus, .refreshApp(1), .refreshApp(2)],
@@ -52,13 +52,13 @@ final class ObserverPlannerCoreTest: XCTestCase {
     func testDegradedObserverEscalatesAfterThreshold() {
         var core = ObserverPlannerCore()
 
-        core.ingest(event(.observerDegraded, pid: 5, windowId: nil, at: 0), isLeftMouseButtonDown: false)
+        core.ingest(event(.observerDegraded, pid: 5, windowId: nil, at: 0))
         assertEquals(core.drainShortIfReady(at: observerPlannerShortDebounceNs), [.refreshApp(5)])
 
-        core.ingest(event(.observerDegraded, pid: 5, windowId: nil, at: 10), isLeftMouseButtonDown: false)
+        core.ingest(event(.observerDegraded, pid: 5, windowId: nil, at: 10))
         assertEquals(core.drainShortIfReady(at: 10 + observerPlannerShortDebounceNs), [.refreshApp(5)])
 
-        core.ingest(event(.observerDegraded, pid: 5, windowId: nil, at: 20), isLeftMouseButtonDown: false)
+        core.ingest(event(.observerDegraded, pid: 5, windowId: nil, at: 20))
         assertEquals(
             core.drainShortIfReady(at: 20 + observerPlannerShortDebounceNs),
             [.fullRefresh(.degradedObserver(5))],
@@ -67,7 +67,7 @@ final class ObserverPlannerCoreTest: XCTestCase {
 
     func testMissingPidEscalatesToConfidenceLossFullRefresh() {
         var core = ObserverPlannerCore()
-        core.ingest(event(.axWindowCreated, pid: nil, windowId: 55, at: 0), isLeftMouseButtonDown: false)
+        core.ingest(event(.axWindowCreated, pid: nil, windowId: 55, at: 0))
 
         assertEquals(
             core.drainShortIfReady(at: observerPlannerShortDebounceNs),
@@ -77,13 +77,13 @@ final class ObserverPlannerCoreTest: XCTestCase {
 
     func testLanePriorityIsImmediateThenShortThenGeometry() {
         var core = ObserverPlannerCore()
-        core.ingest(event(.axWindowMoved, pid: 1, windowId: 11, at: 0), isLeftMouseButtonDown: false)
+        core.ingest(event(.axWindowMoved, pid: 1, windowId: 11, at: 0))
         assertEquals(core.drainImmediate(), [])
-        core.ingest(event(.axWindowCreated, pid: 2, windowId: 21, at: 1), isLeftMouseButtonDown: false)
+        core.ingest(event(.axWindowCreated, pid: 2, windowId: 21, at: 1))
         assertEquals(core.drainImmediate(), [.refreshApp(2)])
-        core.ingest(event(.axFocusedWindowChanged, pid: 2, windowId: 21, at: 2), isLeftMouseButtonDown: false)
+        core.ingest(event(.axFocusedWindowChanged, pid: 2, windowId: 21, at: 2))
         assertEquals(core.drainImmediate(), [])
-        core.ingest(event(.leftMouseUp, pid: nil, windowId: nil, at: 3), isLeftMouseButtonDown: false)
+        core.ingest(event(.leftMouseUp, pid: nil, windowId: nil, at: 3))
         assertEquals(core.drainImmediate(), [.resetManipulatedMouse, .syncMonitorFocus])
         assertEquals(core.drainShortIfReady(at: 1 + observerPlannerShortDebounceNs), [.refreshApp(2)])
         assertEquals(core.drainGeometryIfReady(at: observerPlannerGeometryDebounceNs), [.mouseMove(11)])
@@ -159,7 +159,7 @@ final class ObserverPlannerSimulationTest: XCTestCase {
         }
         harness.drainAll()
 
-        assertEquals(harness.appliedIntents.filter { $0 == .refreshApp(2) }.count, 2)
+        assertEquals(harness.appliedIntents.count(where: { $0 == .refreshApp(2) }), 2)
     }
 
     func testSeededRandomizedSimulationConverges() {
@@ -241,7 +241,7 @@ final class ObserverPlannerSimulationTest: XCTestCase {
 
 final class ObserverPlannerBenchmarkTest: XCTestCase {
     func testCreateStormAlgorithmicBoundsAcrossScales() {
-        for rawEvents in [1_000, 10_000, 100_000] {
+        for rawEvents in [1000, 10000, 100_000] {
             for appCount in [1, 10, 100] {
                 let stats = benchmarkCreateStorm(rawEvents: rawEvents, appCount: appCount)
                 XCTAssertLessThanOrEqual(stats.intents, min(rawEvents, appCount * 2), "rawEvents=\(rawEvents) appCount=\(appCount)")
@@ -250,7 +250,7 @@ final class ObserverPlannerBenchmarkTest: XCTestCase {
     }
 
     func testMixedFocusCreateBoundsAcrossScales() {
-        for rawEvents in [1_000, 10_000, 100_000] {
+        for rawEvents in [1000, 10000, 100_000] {
             for appCount in [1, 10, 100] {
                 let stats = benchmarkMixedFocusCreate(rawEvents: rawEvents, appCount: appCount)
                 XCTAssertLessThanOrEqual(stats.intents, min(rawEvents, appCount * 2), "rawEvents=\(rawEvents) appCount=\(appCount)")
@@ -259,7 +259,7 @@ final class ObserverPlannerBenchmarkTest: XCTestCase {
     }
 
     func testGeometryStormBoundsAcrossScales() {
-        for rawEvents in [1_000, 10_000, 100_000] {
+        for rawEvents in [1000, 10000, 100_000] {
             for appCount in [1, 10, 100] {
                 let stats = benchmarkGeometryStorm(rawEvents: rawEvents, appCount: appCount)
                 XCTAssertLessThanOrEqual(stats.intents, min(rawEvents, appCount * 10), "rawEvents=\(rawEvents) appCount=\(appCount)")
@@ -301,7 +301,7 @@ private struct PlannerSimulationHarness {
     ) {
         apply(core.drainShortIfReady(at: nowNs))
         apply(core.drainGeometryIfReady(at: nowNs))
-        core.ingest(event(kind, pid: pid, windowId: windowId, at: nowNs), isLeftMouseButtonDown: mouseDown)
+        core.ingest(event(kind, pid: pid, windowId: windowId, at: nowNs, mouseDown: mouseDown))
         apply(core.drainImmediate())
         nowNs += 1
     }
@@ -389,7 +389,6 @@ private struct SimulatedWorld: Equatable {
 }
 
 private struct BenchmarkStats {
-    let rawEvents: Int
     let intents: Int
 }
 
@@ -401,7 +400,7 @@ private struct Lcg: RandomNumberGenerator {
     }
 
     mutating func next() -> UInt64 {
-        state = state &* 6364136223846793005 &+ 1
+        state = state &* 6_364_136_223_846_793_005 &+ 1
         return state
     }
 
@@ -422,7 +421,7 @@ private func benchmarkCreateStorm(rawEvents: Int, appCount: Int) -> BenchmarkSta
         intents += core.drainShortIfReady(at: timestampNs).count
         intents += core.drainGeometryIfReady(at: timestampNs).count
         let pid = pid_t(index % appCount + 1)
-        core.ingest(event(.axWindowCreated, pid: pid, windowId: UInt32(index + 1), at: timestampNs), isLeftMouseButtonDown: false)
+        core.ingest(event(.axWindowCreated, pid: pid, windowId: UInt32(index + 1), at: timestampNs))
         intents += core.drainImmediate().count
     }
     if let shortDeadlineNs = core.shortDeadlineNs {
@@ -431,7 +430,7 @@ private func benchmarkCreateStorm(rawEvents: Int, appCount: Int) -> BenchmarkSta
     if let geometryDeadlineNs = core.geometryDeadlineNs {
         intents += core.drainGeometryIfReady(at: geometryDeadlineNs).count
     }
-    return .init(rawEvents: rawEvents, intents: intents)
+    return .init(intents: intents)
 }
 
 private func benchmarkMixedFocusCreate(rawEvents: Int, appCount: Int) -> BenchmarkStats {
@@ -443,7 +442,7 @@ private func benchmarkMixedFocusCreate(rawEvents: Int, appCount: Int) -> Benchma
         intents += core.drainGeometryIfReady(at: timestampNs).count
         let pid = pid_t(index % appCount + 1)
         let kind: ObserverIngressEventKind = index.isMultiple(of: 2) ? .axWindowCreated : .axFocusedWindowChanged
-        core.ingest(event(kind, pid: pid, windowId: UInt32(index % max(1, appCount) + 1), at: timestampNs), isLeftMouseButtonDown: false)
+        core.ingest(event(kind, pid: pid, windowId: UInt32(index % max(1, appCount) + 1), at: timestampNs))
         intents += core.drainImmediate().count
     }
     if let shortDeadlineNs = core.shortDeadlineNs {
@@ -452,7 +451,7 @@ private func benchmarkMixedFocusCreate(rawEvents: Int, appCount: Int) -> Benchma
     if let geometryDeadlineNs = core.geometryDeadlineNs {
         intents += core.drainGeometryIfReady(at: geometryDeadlineNs).count
     }
-    return .init(rawEvents: rawEvents, intents: intents)
+    return .init(intents: intents)
 }
 
 private func benchmarkGeometryStorm(rawEvents: Int, appCount: Int) -> BenchmarkStats {
@@ -466,7 +465,7 @@ private func benchmarkGeometryStorm(rawEvents: Int, appCount: Int) -> BenchmarkS
         let pid = pid_t(index % appCount + 1)
         let windowId = UInt32(index % windowCount + 1)
         let kind: ObserverIngressEventKind = index.isMultiple(of: 2) ? .axWindowMoved : .axWindowResized
-        core.ingest(event(kind, pid: pid, windowId: windowId, at: timestampNs), isLeftMouseButtonDown: false)
+        core.ingest(event(kind, pid: pid, windowId: windowId, at: timestampNs))
         intents += core.drainImmediate().count
     }
     if let shortDeadlineNs = core.shortDeadlineNs {
@@ -475,7 +474,7 @@ private func benchmarkGeometryStorm(rawEvents: Int, appCount: Int) -> BenchmarkS
     if let geometryDeadlineNs = core.geometryDeadlineNs {
         intents += core.drainGeometryIfReady(at: geometryDeadlineNs).count
     }
-    return .init(rawEvents: rawEvents, intents: intents)
+    return .init(intents: intents)
 }
 
 private func event(
@@ -483,6 +482,7 @@ private func event(
     pid: pid_t?,
     windowId: UInt32?,
     at timestampNs: UInt64,
+    mouseDown: Bool = false,
 ) -> ObserverIngressEvent {
-    .init(kind: kind, pid: pid, windowId: windowId, timestampNs: timestampNs)
+    .init(kind: kind, pid: pid, windowId: windowId, timestampNs: timestampNs, isLeftMouseButtonDown: mouseDown)
 }

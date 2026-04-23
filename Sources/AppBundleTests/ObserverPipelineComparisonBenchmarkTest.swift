@@ -7,12 +7,12 @@ final class ObserverPipelineComparisonBenchmarkTest: XCTestCase {
     func testPrintLegacyVsPlannerComparison() {
         let scenarios = BenchmarkScenario.allCases
         let scales: [(rawEvents: Int, appCount: Int)] = [
-            (1_000, 1),
-            (1_000, 10),
-            (1_000, 100),
-            (10_000, 1),
-            (10_000, 10),
-            (10_000, 100),
+            (1000, 1),
+            (1000, 10),
+            (1000, 100),
+            (10000, 1),
+            (10000, 10),
+            (10000, 100),
             (100_000, 1),
             (100_000, 10),
             (100_000, 100),
@@ -61,33 +61,30 @@ private enum BenchmarkScenario: String, CaseIterable {
             let windowId = UInt32(index % windowCount + 1)
             return switch self {
                 case .createStorm:
-                    BenchmarkEvent(id: index, kind: .axWindowCreated, pid: pid, windowId: UInt32(index + 1), timestampNs: timestampNs, mouseDown: false)
+                    BenchmarkEvent(kind: .axWindowCreated, pid: pid, windowId: UInt32(index + 1), timestampNs: timestampNs, mouseDown: false)
                 case .mixedFocusCreate:
                     BenchmarkEvent(
-                        id: index,
                         kind: index.isMultiple(of: 2) ? .axWindowCreated : .axFocusedWindowChanged,
                         pid: pid,
                         windowId: windowId,
                         timestampNs: timestampNs,
-                        mouseDown: false
+                        mouseDown: false,
                     )
                 case .geometryStorm:
                     BenchmarkEvent(
-                        id: index,
                         kind: index.isMultiple(of: 2) ? .axWindowMoved : .axWindowResized,
                         pid: pid,
                         windowId: windowId,
                         timestampNs: timestampNs,
-                        mouseDown: false
+                        mouseDown: false,
                     )
                 case .interactiveGeometryStorm:
                     BenchmarkEvent(
-                        id: index,
                         kind: index.isMultiple(of: 2) ? .axWindowMoved : .axWindowResized,
                         pid: pid,
                         windowId: windowId,
                         timestampNs: timestampNs,
-                        mouseDown: true
+                        mouseDown: true,
                     )
             }
         }
@@ -95,7 +92,6 @@ private enum BenchmarkScenario: String, CaseIterable {
 }
 
 private struct BenchmarkEvent {
-    let id: Int
     let kind: ObserverIngressEventKind
     let pid: pid_t?
     let windowId: UInt32?
@@ -151,8 +147,13 @@ private struct PlannerObserverPipeline: BenchmarkPipeline {
         drain(at: event.timestampNs)
         registerPending(event)
         core.ingest(
-            .init(kind: event.kind, pid: event.pid, windowId: event.windowId, timestampNs: event.timestampNs),
-            isLeftMouseButtonDown: event.mouseDown
+            .init(
+                kind: event.kind,
+                pid: event.pid,
+                windowId: event.windowId,
+                timestampNs: event.timestampNs,
+                isLeftMouseButtonDown: event.mouseDown,
+            ),
         )
         apply(core.drainImmediate(), at: event.timestampNs)
     }
@@ -281,7 +282,7 @@ private func benchmarkMetrics<P: BenchmarkPipeline>(_ workload: [BenchmarkEvent]
         eventCount: workload.count,
         intentCount: pipeline.intentCount,
         p95LatencyNs: latencies[p95Index],
-        maxLatencyNs: latencies.last ?? 0
+        maxLatencyNs: latencies.last ?? 0,
     )
 }
 
@@ -297,8 +298,8 @@ private struct ComparisonMetrics {
     }
 }
 
-private extension ObserverIngressEventKind {
-    var isPidRefreshKind: Bool {
+extension ObserverIngressEventKind {
+    fileprivate var isPidRefreshKind: Bool {
         switch self {
             case .axWindowCreated, .axFocusedWindowChanged, .axWindowDestroyed,
                  .axWindowDeminiaturized, .axWindowMiniaturized, .didLaunchApplication,

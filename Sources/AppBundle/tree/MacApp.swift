@@ -68,7 +68,7 @@ final class MacApp: AbstractApp {
                         axApp,
                         job,
                         ObserverIngress.appAxObserverHandlers,
-                    )) ?? ObserverRegistrationResult(subscriptions: [], requestedNotifications: [], failedNotifications: [])
+                    )) ?? ObserverRegistrationResult(subscriptions: [], failedNotifications: [])
                     ObserverIngress.publishRegistrationResult(registration, pid: pid, windowId: nil)
                     let app = MacApp(nsApp, axApp, registration.subscriptions, Thread.current)
                     Task { @MainActor in

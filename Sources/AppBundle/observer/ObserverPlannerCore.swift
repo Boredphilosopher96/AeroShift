@@ -30,6 +30,7 @@ struct ObserverIngressEvent: Sendable, Hashable {
     let pid: pid_t?
     let windowId: UInt32?
     let timestampNs: UInt64
+    let isLeftMouseButtonDown: Bool
 }
 
 enum PlannerFullRefreshReason: Sendable, Hashable, CustomStringConvertible {
@@ -91,7 +92,8 @@ struct ObserverPlannerCore: Sendable {
     private var uncertainPids: OrderedSet<pid_t> = []
     private var degradedObserverFailures: [pid_t: Int] = [:]
 
-    mutating func ingest(_ event: ObserverIngressEvent, isLeftMouseButtonDown: Bool) {
+    mutating func ingest(_ event: ObserverIngressEvent) {
+        let isLeftMouseButtonDown = event.isLeftMouseButtonDown
         cleanupExpiredShortCooldowns(at: event.timestampNs)
         switch event.kind {
             case .leftMouseUp:
