@@ -28,11 +28,11 @@ brew_tap_owner_dir="$(printf '%s' "$homebrew_tap_owner" | tr '[:upper:]' '[:lowe
 brew_tap_namespace="$(brew --repository)/Library/Taps/$brew_tap_owner_dir"
 brew_tap_root="$brew_tap_namespace/$homebrew_tap_repo_name"
 cleanup-brew-tap() {
-    rm -rf "$brew_tap_namespace"
+    rm -rf "$brew_tap_root"
 }
 trap cleanup-brew-tap EXIT
 
-rm -rf "$brew_tap_namespace"
+rm -rf "$brew_tap_root"
 mkdir -p "$brew_tap_root/Casks"
 cp "./.release/$dev_cask_name.rb" "$brew_tap_root/Casks/$dev_cask_name.rb"
 
