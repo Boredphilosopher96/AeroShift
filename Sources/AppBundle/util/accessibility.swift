@@ -2,6 +2,31 @@ import AppKit
 import Common
 import PrivateApi
 
+let transientAxRetryAttemptCount = 6
+let transientAxRetryDelay: TimeInterval = 0.05
+
+struct AxQueryResult<T> {
+    let status: AXError
+    let value: T
+}
+
+func retryTransientAxFailures<T>(
+    attempts: Int = transientAxRetryAttemptCount,
+    delay: TimeInterval = transientAxRetryDelay,
+    _ query: () -> AxQueryResult<T>,
+) -> AxQueryResult<T> {
+    precondition(attempts > 0)
+    var result = query()
+    for _ in 1 ..< attempts {
+        if !result.status.isTransientAxFailure {
+            return result
+        }
+        Thread.sleep(forTimeInterval: delay)
+        result = query()
+    }
+    return result
+}
+
 @MainActor
 func checkAccessibilityPermissions() {
     let options = [axTrustedCheckOptionPrompt: true]
@@ -331,10 +356,12 @@ extension AXUIElement: AxUiElementMock {
     func get<Attr: ReadableAttr>(_ attr: Attr) -> Attr.T? {
         let state = signposter.beginInterval(#function, "attr: \(attr.key) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
         defer { signposter.endInterval(#function, state) }
-        var raw: AnyObject?
-        return unsafe AXUIElementCopyAttributeValue(self, attr.key as CFString, &raw) == .success
-            ? raw.flatMap(attr.getter)
-            : nil
+        let result: AxQueryResult<Attr.T?> = retryTransientAxFailures {
+            var raw: AnyObject?
+            let status = unsafe AXUIElementCopyAttributeValue(self, attr.key as CFString, &raw)
+            return AxQueryResult(status: status, value: status == .success ? raw.flatMap(attr.getter) : nil)
+        }
+        return result.value
     }
 
     @discardableResult func set<Attr: WritableAttr>(_ attr: Attr, _ value: Attr.T) -> Bool {
@@ -348,8 +375,12 @@ extension AXUIElement: AxUiElementMock {
     func containingWindowId() -> CGWindowID? {
         let state = signposter.beginInterval(#function, "axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
         defer { signposter.endInterval(#function, state) }
-        var cgWindowId = CGWindowID()
-        return unsafe _AXUIElementGetWindow(self, &cgWindowId) == .success ? cgWindowId : nil
+        let result: AxQueryResult<CGWindowID?> = retryTransientAxFailures {
+            var cgWindowId = CGWindowID()
+            let status = unsafe _AXUIElementGetWindow(self, &cgWindowId)
+            return AxQueryResult(status: status, value: status == .success ? cgWindowId : nil)
+        }
+        return result.value
     }
 
     var processIdentifier: pid_t? {
@@ -360,7 +391,22 @@ extension AXUIElement: AxUiElementMock {
 
 extension AXObserver {
     static func new(_ pid: pid_t, _ handler: AXObserverCallback) -> AXObserver? {
-        var observer: AXObserver? = nil
-        return unsafe AXObserverCreate(pid, handler, &observer) == .success ? observer : nil
+        let result: AxQueryResult<AXObserver?> = retryTransientAxFailures {
+            var observer: AXObserver? = nil
+            let status = unsafe AXObserverCreate(pid, handler, &observer)
+            return AxQueryResult(status: status, value: status == .success ? observer : nil)
+        }
+        return result.value
+    }
+}
+
+extension AXError {
+    var isTransientAxFailure: Bool {
+        switch self {
+            case .apiDisabled, .cannotComplete:
+                true
+            default:
+                false
+        }
     }
 }
