@@ -3,9 +3,9 @@ import Common
 
 open class TreeNode: Equatable, AeroAny {
     private var _children: [TreeNode] = []
-    var children: [TreeNode] { _children }
+    var children: [TreeNode] { TreeTopology.shared.children(of: self) }
     fileprivate final weak var _parent: NonLeafTreeNodeObject? = nil
-    final var parent: NonLeafTreeNodeObject? { _parent }
+    final var parent: NonLeafTreeNodeObject? { TreeTopology.shared.parent(of: self) }
     private var adaptiveWeight: CGFloat
     private let _mruChildren: MruStack<TreeNode> = MruStack()
     // Usages:
@@ -19,6 +19,18 @@ open class TreeNode: Equatable, AeroAny {
     var lastAppliedLayoutPhysicalRect: Rect? = nil // with real inner gaps
     final var unboundStacktrace: String? = nil
     var isBound: Bool { parent != nil } // todo drop, once https://github.com/nikitabobko/AeroSpace/issues/1215 is fixed
+
+    final func topologyStorageChildren() -> [TreeNode] { _children }
+    final func topologyStorageParent() -> NonLeafTreeNodeObject? { _parent }
+    final func topologyStorageAdaptiveWeight() -> CGFloat { adaptiveWeight }
+    final func topologySetStorageAdaptiveWeight(_ adaptiveWeight: CGFloat) { self.adaptiveWeight = adaptiveWeight }
+    final func topologyInsertStorageChild(_ child: TreeNode, at index: Int) { _children.insert(child, at: index) }
+    final func topologyRemoveStorageChild(_ child: TreeNode) -> Int? { _children.remove(element: child) }
+    final func topologySetStorageParent(_ parent: NonLeafTreeNodeObject?) { _parent = parent }
+    final func topologyMostRecentStorageChild() -> TreeNode? { _mruChildren.mostRecent }
+    final func topologyPushOrRaiseStorageMruChild(_ child: TreeNode) { _mruChildren.pushOrRaise(child) }
+    @discardableResult
+    final func topologyRemoveStorageMruChild(_ child: TreeNode) -> Bool { _mruChildren.remove(child) }
 
     @MainActor
     init(parent: NonLeafTreeNodeObject, adaptiveWeight: CGFloat, index: Int) {
@@ -66,57 +78,19 @@ open class TreeNode: Equatable, AeroAny {
     @MainActor
     @discardableResult
     func bind(to newParent: NonLeafTreeNodeObject, adaptiveWeight: CGFloat, index: Int) -> BindingData? {
-        let result = unbindIfBound()
-
-        if newParent === NilTreeNode.instance {
-            return result
-        }
-        let relation = getChildParentRelation(child: self, parent: newParent) // Side effect: verify relation
-        if adaptiveWeight == WEIGHT_AUTO {
-            self.adaptiveWeight = switch relation {
-                case .tiling(let newParent):
-                    CGFloat(newParent.children.sumOfDouble { $0.getWeight(newParent.orientation) }).div(newParent.children.count) ?? 1
-                case .floatingWindow, .macosNativeFullscreenWindow,
-                     .rootTilingContainer, .macosNativeMinimizedWindow,
-                     .shimContainerRelation, .macosPopupWindow, .macosNativeHiddenAppWindow:
-                    WEIGHT_DOESNT_MATTER
-            }
-        } else {
-            self.adaptiveWeight = adaptiveWeight
-        }
-        newParent._children.insert(self, at: index != INDEX_BIND_LAST ? index : newParent._children.count)
-        _parent = newParent
-        unboundStacktrace = nil
-        // todo consider disabling automatic mru propogation
-        // 1. "floating windows" in FocusCommand break the MRU because of that :(
-        // 2. Misbehaved apps that abuse real window as popups https://github.com/nikitabobko/AeroSpace/issues/106 (the
-        //    last appeared window, is not necessarily the one that has the focus)
-        markAsMostRecentChild()
-        return result
-    }
-
-    private func unbindIfBound() -> BindingData? {
-        guard let _parent else { return nil }
-
-        let index = _parent._children.remove(element: self) ?? dieT("Can't find child in its parent")
-        check(_parent._mruChildren.remove(self))
-        self._parent = nil
-        unboundStacktrace = getStringStacktrace()
-
-        return BindingData(parent: _parent, adaptiveWeight: adaptiveWeight, index: index)
+        TreeTopology.shared.bind(self, to: newParent, adaptiveWeight: adaptiveWeight, index: index)
     }
 
     func markAsMostRecentChild() {
-        guard let _parent else { return }
-        _parent._mruChildren.pushOrRaise(self)
-        _parent.markAsMostRecentChild()
+        TreeTopology.shared.markAsMostRecentChild(self)
     }
 
-    var mostRecentChild: TreeNode? { _mruChildren.mostRecent ?? children.last }
+    var mostRecentChild: TreeNode? { TreeTopology.shared.mostRecentChild(of: self) }
 
     @discardableResult
     func unbindFromParent() -> BindingData {
-        unbindIfBound() ?? dieT("\(self) is already unbound. The stacktrace where it was unbound:\n\(unboundStacktrace ?? "nil")")
+        TreeTopology.shared.unbind(self) ??
+            dieT("\(self) is already unbound. The stacktrace where it was unbound:\n\(unboundStacktrace ?? "nil")")
     }
 
     nonisolated public static func == (lhs: TreeNode, rhs: TreeNode) -> Bool {
