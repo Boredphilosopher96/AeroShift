@@ -359,7 +359,7 @@ extension AXUIElement: AxUiElementMock {
         let result: AxQueryResult<Attr.T?> = retryTransientAxFailures {
             var raw: AnyObject?
             let status = unsafe AXUIElementCopyAttributeValue(self, attr.key as CFString, &raw)
-            return AxQueryResult(status: status, value: raw.flatMap(attr.getter))
+            return AxQueryResult(status: status, value: status == .success ? raw.flatMap(attr.getter) : nil)
         }
         return result.value
     }
@@ -394,7 +394,7 @@ extension AXObserver {
         let result: AxQueryResult<AXObserver?> = retryTransientAxFailures {
             var observer: AXObserver? = nil
             let status = unsafe AXObserverCreate(pid, handler, &observer)
-            return AxQueryResult(status: status, value: observer)
+            return AxQueryResult(status: status, value: status == .success ? observer : nil)
         }
         return result.value
     }
