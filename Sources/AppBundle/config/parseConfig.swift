@@ -114,6 +114,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "auto-reload-config": Parser(\.autoReloadConfig, parseBool),
     "automatically-unhide-macos-hidden-apps": Parser(\.automaticallyUnhideMacosHiddenApps, parseBool),
     "accordion-padding": Parser(\.accordionPadding, parseInt),
+    "tree-sibling-chunk-size": Parser(\.treeSiblingChunkSize, parseTreeSiblingChunkSize),
     persistentWorkspacesKey: Parser(\.persistentWorkspaces, parsePersistentWorkspaces),
     "exec-on-workspace-change": Parser(\.execOnWorkspaceChange, parseArrayOfStrings),
     "exec": Parser(\.execConfig, parseExecConfig),
@@ -280,6 +281,11 @@ func parseConfigVersion(_ raw: Json, _ backtrace: ConfigBacktrace) -> ParsedConf
 
 func parseInt(_ raw: Json, _ backtrace: ConfigBacktrace) -> ParsedConfig<Int> {
     raw.asIntOrNil.orFailure(expectedActualTypeError(expected: .int, actual: raw.tomlType, backtrace))
+}
+
+func parseTreeSiblingChunkSize(_ raw: Json, _ backtrace: ConfigBacktrace) -> ParsedConfig<Int> {
+    parseInt(raw, backtrace)
+        .filter(.semantic(backtrace, "Must be greater than or equal to 2")) { $0 >= 2 }
 }
 
 func parseString(_ raw: Json, _ backtrace: ConfigBacktrace) -> ParsedConfig<String> {

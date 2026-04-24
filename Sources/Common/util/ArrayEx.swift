@@ -24,16 +24,6 @@ extension Array {
         }
         return found
     }
-
-    @discardableResult
-    public mutating func remove(element: Self.Element) -> Int? where Self.Element: Equatable {
-        switch firstIndex(of: element) {
-            case nil: return nil
-            case let index?:
-                remove(at: index)
-                return index
-        }
-    }
 }
 
 public func - <T>(lhs: [T], rhs: [T]) -> [T] where T: Hashable {

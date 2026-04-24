@@ -210,6 +210,18 @@ final class ConfigTest: XCTestCase {
         )
     }
 
+    func testTreeSiblingChunkSize() {
+        let (config, errors) = parseConfig("tree-sibling-chunk-size = 8")
+        assertEquals(errors, [])
+        assertEquals(config.treeSiblingChunkSize, 8)
+
+        let (_, errors1) = parseConfig("tree-sibling-chunk-size = 1")
+        assertEquals(errors1, ["tree-sibling-chunk-size: Must be greater than or equal to 2"])
+
+        let (_, errors2) = parseConfig("tree-sibling-chunk-size = '64'")
+        assertEquals(errors2, ["tree-sibling-chunk-size: Expected type is 'int'. But actual type is 'string'"])
+    }
+
     func testMoveWorkspaceToMonitorCommandParsing() {
         XCTAssertTrue(parseCommand("move-workspace-to-monitor --wrap-around next").cmdOrNil is MoveWorkspaceToMonitorCommand)
         XCTAssertTrue(parseCommand("move-workspace-to-display --wrap-around next").cmdOrNil is MoveWorkspaceToMonitorCommand)

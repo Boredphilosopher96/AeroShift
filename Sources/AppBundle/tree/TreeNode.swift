@@ -2,7 +2,9 @@ import AppKit
 import Common
 
 open class TreeNode: Equatable, AeroAny {
-    private var _children: [TreeNode] = []
+    private var childStorage = TreeChildStorage<TreeNode>()
+    private var childIndexCache: [ObjectIdentifier: Int] = [:]
+    private var cachedLeafWindows: [Window]?
     var children: [TreeNode] { TreeTopology.shared.children(of: self) }
     fileprivate final weak var _parent: NonLeafTreeNodeObject? = nil
     final var parent: NonLeafTreeNodeObject? { TreeTopology.shared.parent(of: self) }
@@ -20,17 +22,66 @@ open class TreeNode: Equatable, AeroAny {
     final var unboundStacktrace: String? = nil
     var isBound: Bool { parent != nil } // todo drop, once https://github.com/nikitabobko/AeroSpace/issues/1215 is fixed
 
-    final func topologyStorageChildren() -> [TreeNode] { _children }
+    final func topologyStorageChildren() -> [TreeNode] { childStorage.children() }
+    final func topologyStorageChildCount() -> Int { childStorage.count }
+    final func topologyStorageChild(at index: Int) -> TreeNode { childStorage.child(at: index) }
+    final func topologyStorageFirstIndex(of child: TreeNode) -> Int? { childIndexCache[ObjectIdentifier(child)] }
+    final func topologyStorageForEachChild(_ body: (TreeNode) -> Void) { childStorage.forEachChild(body) }
     final func topologyStorageParent() -> NonLeafTreeNodeObject? { _parent }
     final func topologyStorageAdaptiveWeight() -> CGFloat { adaptiveWeight }
     final func topologySetStorageAdaptiveWeight(_ adaptiveWeight: CGFloat) { self.adaptiveWeight = adaptiveWeight }
-    final func topologyInsertStorageChild(_ child: TreeNode, at index: Int) { _children.insert(child, at: index) }
-    final func topologyRemoveStorageChild(_ child: TreeNode) -> Int? { _children.remove(element: child) }
+    final func topologyInsertStorageChild(_ child: TreeNode, at index: Int, chunkSize: Int) {
+        let index = childStorage.insert(child, at: index, chunkSize: chunkSize)
+        shiftCachedChildIndexes(from: index, by: 1)
+        childIndexCache[ObjectIdentifier(child)] = index
+        invalidateLeafWindowCachesUpward()
+    }
+    final func topologyRemoveStorageChild(_ child: TreeNode, chunkSize: Int) -> Int? {
+        guard let index = childIndexCache.removeValue(forKey: ObjectIdentifier(child)) else { return nil }
+        check(childStorage.remove(at: index, chunkSize: chunkSize) === child)
+        shiftCachedChildIndexes(from: index, by: -1)
+        invalidateLeafWindowCachesUpward()
+        return index
+    }
+    final func topologyStorageLeafWindows() -> [Window] {
+        if let window = self as? Window {
+            return [window]
+        }
+        if let cachedLeafWindows {
+            return cachedLeafWindows
+        }
+        var result: [Window] = []
+        result.reserveCapacity(childStorage.count)
+        childStorage.forEachChild { child in
+            if let window = child as? Window {
+                result.append(window)
+            } else {
+                result.append(contentsOf: child.topologyStorageLeafWindows())
+            }
+        }
+        cachedLeafWindows = result
+        return result
+    }
     final func topologySetStorageParent(_ parent: NonLeafTreeNodeObject?) { _parent = parent }
     final func topologyMostRecentStorageChild() -> TreeNode? { _mruChildren.mostRecent }
     final func topologyPushOrRaiseStorageMruChild(_ child: TreeNode) { _mruChildren.pushOrRaise(child) }
     @discardableResult
     final func topologyRemoveStorageMruChild(_ child: TreeNode) -> Bool { _mruChildren.remove(child) }
+    final func topologyStorageUsesChunks() -> Bool { childStorage.usesChunks }
+
+    private func shiftCachedChildIndexes(from startIndex: Int, by delta: Int) {
+        for (child, oldIndex) in childIndexCache where oldIndex >= startIndex {
+            childIndexCache[child] = oldIndex + delta
+        }
+    }
+
+    private func invalidateLeafWindowCachesUpward() {
+        var node: TreeNode? = self
+        while let current = node {
+            current.cachedLeafWindows = nil
+            node = current._parent
+        }
+    }
 
     @MainActor
     init(parent: NonLeafTreeNodeObject, adaptiveWeight: CGFloat, index: Int) {
@@ -53,7 +104,7 @@ open class TreeNode: Equatable, AeroAny {
                 if parent.layout != .tiles {
                     die("Weight can be changed only for nodes whose parent has 'tiles' layout")
                 }
-                adaptiveWeight = newValue
+                topologySetStorageAdaptiveWeight(newValue)
             default:
                 die("Can't change weight")
         }
@@ -65,7 +116,7 @@ open class TreeNode: Equatable, AeroAny {
         guard let parent else { die("Weight doesn't make sense for containers without parent") }
         return switch getChildParentRelation(child: self, parent: parent) {
             case .tiling(let parent):
-                parent.orientation == targetOrientation ? adaptiveWeight : parent.getWeight(targetOrientation)
+                parent.orientation == targetOrientation ? topologyStorageAdaptiveWeight() : parent.getWeight(targetOrientation)
             case .rootTilingContainer: parent.getWeight(targetOrientation)
             case .floatingWindow, .macosNativeFullscreenWindow: dieT("Weight doesn't make sense for floating windows")
             case .macosNativeMinimizedWindow: dieT("Weight doesn't make sense for minimized windows")
@@ -88,6 +139,7 @@ open class TreeNode: Equatable, AeroAny {
     var mostRecentChild: TreeNode? { TreeTopology.shared.mostRecentChild(of: self) }
 
     @discardableResult
+    @MainActor
     func unbindFromParent() -> BindingData {
         TreeTopology.shared.unbind(self) ??
             dieT("\(self) is already unbound. The stacktrace where it was unbound:\n\(unboundStacktrace ?? "nil")")

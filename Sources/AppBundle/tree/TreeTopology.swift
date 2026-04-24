@@ -10,13 +10,29 @@ final class TreeTopology: @unchecked Sendable {
         node.topologyStorageChildren()
     }
 
+    func childCount(of node: TreeNode) -> Int {
+        node.topologyStorageChildCount()
+    }
+
+    func child(at index: Int, in node: TreeNode) -> TreeNode {
+        node.topologyStorageChild(at: index)
+    }
+
+    func childIndex(of child: TreeNode) -> Int? {
+        ownIndex(of: child)
+    }
+
+    func forEachChild(of node: TreeNode, _ body: (TreeNode) -> Void) {
+        node.topologyStorageForEachChild(body)
+    }
+
     func parent(of node: TreeNode) -> NonLeafTreeNodeObject? {
         node.topologyStorageParent()
     }
 
     func ownIndex(of node: TreeNode) -> Int? {
         guard let parent = parent(of: node) else { return nil }
-        return children(of: parent).firstIndex(of: node).orDie()
+        return parent.topologyStorageFirstIndex(of: node).orDie()
     }
 
     func parents(of node: TreeNode) -> [NonLeafTreeNodeObject] {
@@ -28,13 +44,11 @@ final class TreeTopology: @unchecked Sendable {
     }
 
     func leafWindows(in node: TreeNode) -> [Window] {
-        var result: [Window] = []
-        visitLeafWindows(in: node, result: &result)
-        return result
+        node.topologyStorageLeafWindows()
     }
 
     func mostRecentChild(of node: TreeNode) -> TreeNode? {
-        node.topologyMostRecentStorageChild() ?? children(of: node).last
+        node.topologyMostRecentStorageChild() ?? (childCount(of: node) == 0 ? nil : child(at: childCount(of: node) - 1, in: node))
     }
 
     func mostRecentWindow(in node: TreeNode) -> Window? {
@@ -50,8 +64,10 @@ final class TreeTopology: @unchecked Sendable {
                 return window
             case .tilingContainer(let container):
                 if direction.orientation == container.orientation {
-                    return (direction.isPositive ? children(of: container).last : children(of: container).first)
-                        .flatMap { findLeafWindow(in: $0, snappedTo: direction) }
+                    let target = direction.isPositive
+                        ? (childCount(of: container) == 0 ? nil : child(at: childCount(of: container) - 1, in: container))
+                        : (childCount(of: container) == 0 ? nil : child(at: 0, in: container))
+                    return target.flatMap { findLeafWindow(in: $0, snappedTo: direction) }
                 } else {
                     return mostRecentChild(of: container).flatMap { findLeafWindow(in: $0, snappedTo: direction) }
                 }
@@ -86,7 +102,7 @@ final class TreeTopology: @unchecked Sendable {
                 case .tilingContainer(let parent):
                     (layout == nil || parent.layout == layout) &&
                         parent.orientation == direction.orientation &&
-                        (ownIndex(of: candidate).map { children(of: parent).indices.contains($0 + direction.focusOffset) } ?? true)
+                        (ownIndex(of: candidate).map { (0 ..< childCount(of: parent)).contains($0 + direction.focusOffset) } ?? true)
             }
         })
         guard let innermostChild else { return nil }
@@ -118,13 +134,16 @@ final class TreeTopology: @unchecked Sendable {
     }
 
     func window(at point: CGPoint, in tree: TilingContainer, virtual: Bool) -> Window? {
-        let target: TreeNode? = switch tree.layout {
+        var target: TreeNode?
+        switch tree.layout {
             case .tiles:
-                children(of: tree).first(where: {
-                    (virtual ? $0.lastAppliedLayoutVirtualRect : $0.lastAppliedLayoutPhysicalRect)?.contains(point) == true
-                })
+                forEachChild(of: tree) {
+                    if target == nil && (virtual ? $0.lastAppliedLayoutVirtualRect : $0.lastAppliedLayoutPhysicalRect)?.contains(point) == true {
+                        target = $0
+                    }
+                }
             case .accordion:
-                mostRecentChild(of: tree)
+                target = mostRecentChild(of: tree)
         }
         guard let target else { return nil }
         return switch target.tilingTreeNodeCasesOrDie() {
@@ -181,19 +200,22 @@ final class TreeTopology: @unchecked Sendable {
         }
         let relation = getChildParentRelation(child: node, parent: newParent)
         if adaptiveWeight == WEIGHT_AUTO {
-            let resolvedWeight: CGFloat = switch relation {
+            let resolvedWeight: CGFloat
+            switch relation {
                 case .tiling(let newParent):
-                    CGFloat(children(of: newParent).sumOfDouble { $0.getWeight(newParent.orientation) }).div(children(of: newParent).count) ?? 1
+                    var total = 0.0
+                    forEachChild(of: newParent) { total += $0.getWeight(newParent.orientation) }
+                    resolvedWeight = CGFloat(total).div(childCount(of: newParent)) ?? 1
                 case .floatingWindow, .macosNativeFullscreenWindow,
                      .rootTilingContainer, .macosNativeMinimizedWindow,
                      .shimContainerRelation, .macosPopupWindow, .macosNativeHiddenAppWindow:
-                    WEIGHT_DOESNT_MATTER
+                    resolvedWeight = WEIGHT_DOESNT_MATTER
             }
             node.topologySetStorageAdaptiveWeight(resolvedWeight)
         } else {
             node.topologySetStorageAdaptiveWeight(adaptiveWeight)
         }
-        newParent.topologyInsertStorageChild(node, at: index != INDEX_BIND_LAST ? index : children(of: newParent).count)
+        insertChild(node, into: newParent, at: index != INDEX_BIND_LAST ? index : childCount(of: newParent))
         node.topologySetStorageParent(newParent)
         node.unboundStacktrace = nil
         markAsMostRecentChild(node)
@@ -201,12 +223,13 @@ final class TreeTopology: @unchecked Sendable {
         return result
     }
 
+    @MainActor
     @discardableResult
     func unbind(_ node: TreeNode) -> BindingData? {
         let result = unbindIfBound(node)
         if let previousParent = result?.parent {
-            check(!children(of: previousParent).contains(node), "Previous parent still contains unbound child")
-            for child in children(of: previousParent) {
+            check(previousParent.topologyStorageFirstIndex(of: node) == nil, "Previous parent still contains unbound child")
+            forEachChild(of: previousParent) { child in
                 check(parent(of: child) === previousParent, "Previous parent's child does not point back to previous parent")
             }
             assertLocalInvariants(afterMutating: node)
@@ -221,27 +244,33 @@ final class TreeTopology: @unchecked Sendable {
     }
 
     func assertLocalInvariants(afterMutating node: TreeNode) {
-        if let parent = parent(of: node) {
-            check(children(of: parent).contains(node), "Parent does not contain child")
+        if parent(of: node) != nil {
+            check(childIndex(of: node) != nil, "Parent does not contain child")
         }
-        for child in children(of: node) {
+        forEachChild(of: node) { child in
             check(parent(of: child) === node, "Child does not point back to parent")
         }
     }
 
-    private func visitLeafWindows(in node: TreeNode, result: inout [Window]) {
-        if let node = node as? Window {
-            result.append(node)
-        }
-        for child in children(of: node) {
-            visitLeafWindows(in: child, result: &result)
-        }
+    @MainActor
+    func insertChild(_ child: TreeNode, into parent: NonLeafTreeNodeObject, at index: Int) {
+        parent.topologyInsertStorageChild(child, at: index, chunkSize: config.treeSiblingChunkSize)
     }
 
+    @MainActor
+    func removeChild(_ child: TreeNode, from parent: NonLeafTreeNodeObject) -> Int? {
+        parent.topologyRemoveStorageChild(child, chunkSize: config.treeSiblingChunkSize)
+    }
+
+    func usesChunkedChildren(_ node: TreeNode) -> Bool {
+        node.topologyStorageUsesChunks()
+    }
+
+    @MainActor
     private func unbindIfBound(_ node: TreeNode) -> BindingData? {
         guard let parent = parent(of: node) else { return nil }
 
-        let index = parent.topologyRemoveStorageChild(node) ?? dieT("Can't find child in its parent")
+        let index = removeChild(node, from: parent) ?? dieT("Can't find child in its parent")
         check(parent.topologyRemoveStorageMruChild(node))
         node.topologySetStorageParent(nil)
         node.unboundStacktrace = getStringStacktrace()

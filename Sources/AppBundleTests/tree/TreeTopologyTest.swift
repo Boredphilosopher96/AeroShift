@@ -37,6 +37,42 @@ final class TreeTopologyTest: XCTestCase {
         assertEquals(TreeTopology.shared.leafWindows(in: workspace).map(\.windowId), [2, 1])
     }
 
+    func testObjectBackedChunkedChildrenPreserveOrderAndIndexes() {
+        config.treeSiblingChunkSize = 4
+        let workspace = Workspace.get(byName: name)
+        let root = workspace.rootTilingContainer
+        let windows = (0 ..< 10).map { TestWindow.new(id: UInt32($0), parent: root) }
+
+        assertEquals(TreeTopology.shared.usesChunkedChildren(root), true)
+        assertEquals(TreeTopology.shared.children(of: root), windows)
+        for (index, window) in windows.enumerated() {
+            assertEquals(TreeTopology.shared.ownIndex(of: window), index)
+            assertEquals(TreeTopology.shared.parent(of: window) === root, true)
+        }
+
+        windows[5].unbindFromParent()
+        assertEquals(TreeTopology.shared.children(of: root).map { ($0 as! Window).windowId }, [0, 1, 2, 3, 4, 6, 7, 8, 9])
+
+        windows[5].bind(to: root, adaptiveWeight: 1, index: 2)
+        assertEquals(TreeTopology.shared.children(of: root).map { ($0 as! Window).windowId }, [0, 1, 5, 2, 3, 4, 6, 7, 8, 9])
+        assertEquals(TreeTopology.shared.ownIndex(of: windows[5]), 2)
+    }
+
+    func testChunkThresholdBoundaries() {
+        config.treeSiblingChunkSize = 64
+        let workspace = Workspace.get(byName: name)
+        let root = workspace.rootTilingContainer
+
+        for id in 0 ..< 63 {
+            TestWindow.new(id: UInt32(id), parent: root)
+        }
+        assertEquals(TreeTopology.shared.usesChunkedChildren(root), false)
+        TestWindow.new(id: 63, parent: root)
+        assertEquals(TreeTopology.shared.usesChunkedChildren(root), false)
+        TestWindow.new(id: 64, parent: root)
+        assertEquals(TreeTopology.shared.usesChunkedChildren(root), true)
+    }
+
     func testFacadeDirectionalLookupAndSnappedLeaf() {
         let workspace = Workspace.get(byName: name)
         let root = workspace.rootTilingContainer
