@@ -10,6 +10,9 @@ let signposter = OSSignposter(subsystem: aeroshiftAppId, category: .pointsOfInte
 let myPid = NSRunningApplication.current.processIdentifier
 let lockScreenAppBundleId = "com.apple.loginwindow"
 @MainActor private var terminationSignalSources: [DispatchSourceSignal] = []
+@MainActor private var appBundleTerminationCleanupTask: Task<(), Never>?
+@MainActor private var appBundleTerminationCleanupDidFinish = false
+@MainActor private var appKitTerminationReplyWasScheduled = false
 
 @MainActor
 func interceptTermination(_ _signal: Int32) {
@@ -36,8 +39,79 @@ func initTerminationHandler() {
 
 private struct AppServerTerminationHandler: TerminationHandler {
     func beforeTermination() async {
+        await runAppBundleTerminationCleanup()
+    }
+}
+
+@MainActor
+private func runAppBundleTerminationCleanup() async {
+    guard let task = startAppBundleTerminationCleanup() else { return }
+    await task.value
+}
+
+@MainActor
+private func startAppBundleTerminationCleanup() -> Task<(), Never>? {
+    if appBundleTerminationCleanupDidFinish { return nil }
+    if let appBundleTerminationCleanupTask { return appBundleTerminationCleanupTask }
+
+    let task = Task { @MainActor in
+        beginAppBundleTermination()
+        await discoverWindowsForTermination()
         await makeAllWindowsVisibleAndRestoreSize()
         await toggleReleaseServerIfDebug(.on)
+        appBundleTerminationCleanupDidFinish = true
+    }
+    appBundleTerminationCleanupTask = task
+    return task
+}
+
+@MainActor
+public func applicationShouldTerminateAfterAppBundleCleanup(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    if appBundleTerminationCleanupDidFinish {
+        return .terminateNow
+    }
+    let cleanupTask = startAppBundleTerminationCleanup()
+    if !appKitTerminationReplyWasScheduled {
+        appKitTerminationReplyWasScheduled = true
+        Task { @MainActor in
+            await cleanupTask?.value
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+    }
+    return .terminateLater
+}
+
+@MainActor
+func resetAppBundleTerminationCleanupForTests() {
+    if isUnitTest {
+        appBundleTerminationCleanupTask?.cancel()
+        appBundleTerminationCleanupTask = nil
+        appBundleTerminationCleanupDidFinish = false
+        appKitTerminationReplyWasScheduled = false
+    }
+}
+
+@MainActor
+private func discoverWindowsForTermination() async {
+    do {
+        let mapping = try await MacApp.refreshAllAndGetAliveWindowIds(
+            frontmostAppBundleId: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+        )
+        for (app, windowIds) in mapping {
+            for windowId in windowIds {
+                do {
+                    try await MacWindow.getOrRegister(
+                        windowId: windowId,
+                        macApp: app,
+                        runWindowDetectedCallbacks: false,
+                    )
+                } catch {
+                    eprint("Failed to register window \(windowId) before termination: \(error)")
+                }
+            }
+        }
+    } catch {
+        eprint("Failed to refresh windows before termination: \(error)")
     }
 }
 
@@ -91,9 +165,14 @@ func makeVisibleRestorationFrame(monitorVisibleRect: Rect, preferredSize: CGSize
 }
 
 @MainActor
-func terminateApp() -> Never {
+public func requestAppTermination() {
     NSApplication.shared.terminate(nil)
-    die("Unreachable code")
+}
+
+@MainActor
+func terminateApp() -> Never {
+    requestAppTermination()
+    Darwin.exit(EXIT_SUCCESS)
 }
 
 extension String {

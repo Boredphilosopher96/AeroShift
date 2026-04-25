@@ -120,6 +120,28 @@ final class LayoutVisibilityRecoveryTest: XCTestCase {
         assertEquals(frame.size, CGSize(width: 1600, height: 600))
     }
 
+    func testTerminationModeDisablesLayoutBeforeRestoringWindows() {
+        TrayMenuModel.shared.isEnabled = true
+
+        beginAppBundleTermination()
+
+        assertEquals(TrayMenuModel.shared.isEnabled, false)
+    }
+
+    func testTerminatingAppRejectsNewLightSessionsBeforeBodyRuns() async throws {
+        beginAppBundleTermination()
+
+        do {
+            _ = try await runLightSession(.menuBarButton, .forceRun) {
+                XCTFail("Termination mode must reject new light-session bodies")
+                return 1
+            }
+            XCTFail("Expected CancellationError")
+        } catch is CancellationError {
+            // Expected.
+        }
+    }
+
     func testSeededQuitRestorationSimulationKeepsWindowsVisibleAndCentered() {
         let monitorRects = [
             Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080),
@@ -173,6 +195,38 @@ final class LayoutVisibilityRecoveryTest: XCTestCase {
                 assertEquals(frame.topLeft, expectedTopLeft, additionalMsg: "seed=\(seed) step=\(step)")
             }
         }
+    }
+
+    func testSeededQuitLifecycleSimulationBlocksRefreshAndLightSessionRaces() {
+        let monitorRect = Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080)
+        var baselineFailures = 0
+
+        for seed in [55 as UInt64, 89, 144, 233, 377] {
+            var rng = QuitRestoreLcg(seed: seed)
+            for step in 0 ..< 250 {
+                let world = QuitLifecycleWorld.random(monitorRect: monitorRect, rng: &rng)
+
+                var baseline = world
+                baseline.restoreAllWindows()
+                baseline.enqueuePostRestoreNoise(rng: &rng)
+                baseline.runQueuedEvents()
+                if !baseline.allWindowsVisible {
+                    baselineFailures += 1
+                }
+
+                var fixed = world
+                fixed.beginTermination()
+                fixed.restoreAllWindows()
+                fixed.enqueuePostRestoreNoise(rng: &rng)
+                fixed.runQueuedEvents()
+                XCTAssertTrue(
+                    fixed.allWindowsVisible,
+                    "seed=\(seed) step=\(step) fixed=\(fixed)",
+                )
+            }
+        }
+
+        XCTAssertGreaterThan(baselineFailures, 0)
     }
 }
 
@@ -228,5 +282,138 @@ private struct QuitRestoreLcg: RandomNumberGenerator {
 
     mutating func nextBool(probabilityPercent: Int) -> Bool {
         nextInt(100) < probabilityPercent
+    }
+}
+
+private struct QuitLifecycleWorld: CustomStringConvertible {
+    private enum QueuedEvent {
+        case heavyRefresh
+        case lightSessionPostBodyLayout
+        case geometryNotification
+        case inFlightLayoutResume
+        case directWindowMutation
+    }
+
+    private struct WindowState: CustomStringConvertible {
+        let workspaceIsVisible: Bool
+        let preferredSize: CGSize?
+        var rect: Rect
+
+        var description: String {
+            "WindowState(workspaceIsVisible: \(workspaceIsVisible), preferredSize: \(String(describing: preferredSize)), rect: \(rect))"
+        }
+    }
+
+    private let monitorRect: Rect
+    private var windows: [WindowState]
+    private var queuedEvents: [QueuedEvent] = []
+    private var isTerminating = false
+
+    var description: String {
+        "QuitLifecycleWorld(isTerminating: \(isTerminating), windows: \(windows))"
+    }
+
+    static func random(monitorRect: Rect, rng: inout QuitRestoreLcg) -> QuitLifecycleWorld {
+        let windowCount = 1 + rng.nextInt(8)
+        var windows: [WindowState] = []
+        var hasInvisibleWorkspaceWindow = false
+        for index in 0 ..< windowCount {
+            let workspaceIsVisible = index == 0 ? false : rng.nextBool(probabilityPercent: 40)
+            hasInvisibleWorkspaceWindow = hasInvisibleWorkspaceWindow || !workspaceIsVisible
+            let size = CGSize(
+                width: CGFloat(120 + rng.nextInt(1200)),
+                height: CGFloat(80 + rng.nextInt(800)),
+            )
+            let rect = randomWindowRect(
+                monitorRect: monitorRect,
+                windowSize: size,
+                behavior: workspaceIsVisible ? rng.nextInt(2) : 1 + rng.nextInt(2),
+                rng: &rng,
+            )
+            let preferredSize = rng.nextBool(probabilityPercent: 50)
+                ? CGSize(width: CGFloat(100 + rng.nextInt(1500)), height: CGFloat(80 + rng.nextInt(900)))
+                : nil
+            windows.append(WindowState(workspaceIsVisible: workspaceIsVisible, preferredSize: preferredSize, rect: rect))
+        }
+        precondition(hasInvisibleWorkspaceWindow)
+        return QuitLifecycleWorld(monitorRect: monitorRect, windows: windows)
+    }
+
+    mutating func beginTermination() {
+        isTerminating = true
+        queuedEvents = []
+    }
+
+    mutating func restoreAllWindows() {
+        for index in windows.indices {
+            let frame = makeVisibleRestorationFrame(
+                knownVisibleRect: monitorRect,
+                currentWindowRect: windows[index].rect,
+                preferredSize: windows[index].preferredSize,
+            )
+            windows[index].rect = Rect(
+                topLeftX: frame.topLeft.x,
+                topLeftY: frame.topLeft.y,
+                width: frame.size.width,
+                height: frame.size.height,
+            )
+        }
+    }
+
+    mutating func enqueuePostRestoreNoise(rng: inout QuitRestoreLcg) {
+        let count = 1 + rng.nextInt(8)
+        for _ in 0 ..< count {
+            let event: QueuedEvent = switch rng.nextInt(5) {
+                case 0: .heavyRefresh
+                case 1: .lightSessionPostBodyLayout
+                case 2: .inFlightLayoutResume
+                case 3: .directWindowMutation
+                default: .geometryNotification
+            }
+            queuedEvents.append(event)
+        }
+    }
+
+    mutating func runQueuedEvents() {
+        while !queuedEvents.isEmpty {
+            let event = queuedEvents.removeFirst()
+            if isTerminating { continue }
+            switch event {
+                case .heavyRefresh, .lightSessionPostBodyLayout, .geometryNotification, .inFlightLayoutResume:
+                    layoutWorkspaces()
+                case .directWindowMutation:
+                    directWindowMutation()
+            }
+        }
+    }
+
+    var allWindowsVisible: Bool {
+        windows.allSatisfy { $0.rect.isEffectivelyVisible(in: monitorRect) }
+    }
+
+    private mutating func layoutWorkspaces() {
+        for index in windows.indices where !windows[index].workspaceIsVisible {
+            windows[index].rect = hiddenBottomRightRect(size: windows[index].rect.size)
+        }
+    }
+
+    private mutating func directWindowMutation() {
+        for index in windows.indices where !windows[index].workspaceIsVisible {
+            windows[index].rect = Rect(
+                topLeftX: monitorRect.maxX + 20,
+                topLeftY: monitorRect.maxY + 20,
+                width: windows[index].rect.width,
+                height: windows[index].rect.height,
+            )
+        }
+    }
+
+    private func hiddenBottomRightRect(size: CGSize) -> Rect {
+        Rect(
+            topLeftX: monitorRect.maxX - 1,
+            topLeftY: monitorRect.maxY - 1,
+            width: size.width,
+            height: size.height,
+        )
     }
 }

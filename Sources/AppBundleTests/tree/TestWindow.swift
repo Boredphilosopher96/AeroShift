@@ -40,6 +40,7 @@ final class TestWindow: Window, CustomStringConvertible {
         _rect?.size
     }
 
+    @MainActor
     override func setAxFrame(_ topLeft: CGPoint?, _ size: CGSize?) {
         var rect = _rect ?? Rect(
             topLeftX: topLeft?.x ?? 0,
