@@ -3,20 +3,24 @@ import Common
 
 @MainActor
 private var activeRefreshTask: Task<(), any Error>? = nil
+@MainActor
+private var isAppBundleTerminating = false
 
 @MainActor
 func scheduleCancellableCompleteRefreshSession(
     _ event: RefreshSessionEvent,
     optimisticallyPreLayoutWorkspaces: Bool = false,
 ) {
-    activeRefreshTask?.cancel()
-    activeRefreshTask = Task { @MainActor in
-        try checkCancellation()
-        await runHeavyCompleteRefreshSession(
-            event,
-            cancellable: true,
-            optimisticallyPreLayoutWorkspaces: optimisticallyPreLayoutWorkspaces,
-        )
+    runIfAppBundleIsActive {
+        activeRefreshTask?.cancel()
+        activeRefreshTask = Task { @MainActor in
+            try checkCancellation()
+            await runHeavyCompleteRefreshSession(
+                event,
+                cancellable: true,
+                optimisticallyPreLayoutWorkspaces: optimisticallyPreLayoutWorkspaces,
+            )
+        }
     }
 }
 
@@ -31,25 +35,27 @@ func runHeavyCompleteRefreshSession(
     defer { signposter.endInterval(#function, state) }
     if !TrayMenuModel.shared.isEnabled { return }
     let res = await Result {
-        try await $refreshSessionEvent.withValue(event) {
-            try await $_isStartup.withValue(event.isStartup) {
-                let nativeFocused = try await getNativeFocusedWindow()
-                if let nativeFocused { try await debugWindowsIfRecording(nativeFocused) }
-                updateFocusCache(nativeFocused)
+        try await runIfAppBundleIsActive {
+            try await $refreshSessionEvent.withValue(event) {
+                try await $_isStartup.withValue(event.isStartup) {
+                    let nativeFocused = try await getNativeFocusedWindow()
+                    if let nativeFocused { try await debugWindowsIfRecording(nativeFocused) }
+                    updateFocusCache(nativeFocused)
 
-                if shouldLayoutWorkspaces && optimisticallyPreLayoutWorkspaces { try await layoutWorkspaces() }
+                    if shouldLayoutWorkspaces && optimisticallyPreLayoutWorkspaces { try await layoutWorkspaces() }
 
-                refreshModel()
-                try await refresh()
-                gcMonitors()
-                if event.isStartup {
-                    try await replayStartupWindowDetectedCallbacks()
+                    refreshModel()
+                    try await refresh()
+                    gcMonitors()
+                    if event.isStartup {
+                        try await replayStartupWindowDetectedCallbacks()
+                    }
+
+                    updateTrayText()
+                    SecureInputPanel.shared.refresh()
+                    try await normalizeLayoutReason()
+                    if shouldLayoutWorkspaces { try await layoutWorkspaces() }
                 }
-
-                updateTrayText()
-                SecureInputPanel.shared.refresh()
-                try await normalizeLayoutReason()
-                if shouldLayoutWorkspaces { try await layoutWorkspaces() }
             }
         }
     }
@@ -70,6 +76,7 @@ func runLightSession<T>(
 ) async throws -> T {
     let state = signposter.beginInterval(#function, "event: \(event) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
     defer { signposter.endInterval(#function, state) }
+    try throwIfAppBundleIsTerminating()
     activeRefreshTask?.cancel() // Give priority to runSession
     activeRefreshTask = nil
     return try await $refreshSessionEvent.withValue(event) {
@@ -81,24 +88,81 @@ func runLightSession<T>(
 
             refreshModel()
             let result = try await body()
-            refreshModel()
+            return try await finishLightSessionIfAppBundleIsActive(returning: result) {
+                refreshModel()
 
-            let focusAfter = focus.windowOrNil
+                let focusAfter = focus.windowOrNil
 
-            updateTrayText()
-            SecureInputPanel.shared.refresh()
-            if normalizeLayoutAfterBody {
-                try await normalizeLayoutReason()
+                updateTrayText()
+                SecureInputPanel.shared.refresh()
+                if normalizeLayoutAfterBody {
+                    try await normalizeLayoutReason()
+                }
+                try await layoutWorkspaces()
+                if focusBefore != focusAfter {
+                    focusAfter?.nativeFocus() // syncFocusToMacOs
+                }
+                if scheduleFollowupRefresh {
+                    scheduleCancellableCompleteRefreshSession(event)
+                }
             }
-            try await layoutWorkspaces()
-            if focusBefore != focusAfter {
-                focusAfter?.nativeFocus() // syncFocusToMacOs
-            }
-            if scheduleFollowupRefresh {
-                scheduleCancellableCompleteRefreshSession(event)
-            }
-            return result
         }
+    }
+}
+
+@MainActor
+func beginAppBundleTermination() {
+    isAppBundleTerminating = true
+    activeRefreshTask?.cancel()
+    activeRefreshTask = nil
+    TrayMenuModel.shared.isEnabled = false
+}
+
+@MainActor
+private func runIfAppBundleIsActive(_ body: @MainActor () -> Void) {
+    if isAppBundleTerminating { return }
+    body()
+}
+
+@MainActor
+private func runIfAppBundleIsActive(_ body: @MainActor () async throws -> Void) async rethrows {
+    if isAppBundleTerminating { return }
+    try await body()
+}
+
+@MainActor
+private func finishLightSessionIfAppBundleIsActive<T>(
+    returning result: T,
+    _ body: @MainActor () async throws -> Void,
+) async rethrows -> T {
+    if isAppBundleTerminating { return result }
+    try await body()
+    return result
+}
+
+@MainActor
+private func throwIfAppBundleIsTerminating() throws {
+    if isAppBundleTerminating { throw CancellationError() }
+}
+
+@MainActor
+func runAppBundleWindowMutation(_ body: @MainActor () -> Void) {
+    if isAppBundleTerminating { return }
+    body()
+}
+
+@MainActor
+func runAppBundleWindowMutation(_ body: @MainActor () async throws -> Void) async rethrows {
+    if isAppBundleTerminating { return }
+    try await body()
+}
+
+@MainActor
+func resetAppBundleTerminationForTests() {
+    if isUnitTest {
+        isAppBundleTerminating = false
+        activeRefreshTask?.cancel()
+        activeRefreshTask = nil
     }
 }
 

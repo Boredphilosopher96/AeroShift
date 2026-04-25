@@ -46,14 +46,7 @@ public func menuBar(viewModel: TrayMenuModel) -> some Scene { // todo should it 
         openConfigButton()
         reloadConfigButton()
         Button("Quit \(aeroshiftAppName)") {
-            Task {
-                defer { terminateApp() }
-                do {
-                    try await terminationHandler.beforeTermination()
-                } catch {
-                    eprint("Failed to restore windows before quit: \(error)")
-                }
-            }
+            requestAppTermination()
         }.keyboardShortcut("Q", modifiers: .command)
     } label: {
         if viewModel.isEnabled {
