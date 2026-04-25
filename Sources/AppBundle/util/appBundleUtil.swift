@@ -18,7 +18,11 @@ func interceptTermination(_ _signal: Int32) {
     source.setEventHandler {
         Task { @MainActor in
             defer { Darwin.exit(_signal) }
-            try await terminationHandler.beforeTermination()
+            do {
+                try await terminationHandler.beforeTermination()
+            } catch {
+                eprint("Failed to restore windows before termination: \(error)")
+            }
         }
     }
     source.resume()
@@ -31,25 +35,46 @@ func initTerminationHandler() {
 }
 
 private struct AppServerTerminationHandler: TerminationHandler {
-    func beforeTermination() async throws {
-        try await makeAllWindowsVisibleAndRestoreSize()
+    func beforeTermination() async {
+        await makeAllWindowsVisibleAndRestoreSize()
         await toggleReleaseServerIfDebug(.on)
     }
 }
 
 @MainActor
-private func makeAllWindowsVisibleAndRestoreSize() async throws {
-    for (_, window) in MacWindow.allWindowsMap {
-        // makeAllWindowsVisibleAndRestoreSize may be invoked when something went wrong (e.g. some windows are unbound)
-        // that's why it's not allowed to use `.parent` call in here
-        let monitor = try await window.getCenter()?.monitorApproximation ?? mainMonitor
-        let monitorVisibleRect = monitor.visibleRect
+private func makeAllWindowsVisibleAndRestoreSize() async {
+    for window in MacWindow.allWindows {
+        await makeWindowVisibleAndRestoreSize(window)
+    }
+}
+
+@MainActor
+private func makeWindowVisibleAndRestoreSize(_ window: MacWindow) async {
+    do {
+        // Termination cleanup must be best-effort because some windows may already be gone or unbound.
+        let windowRect = try? await window.getAxRect()
+        let knownVisibleRect = window.nodeWorkspace?.workspaceMonitor.visibleRect ?? window.nodeMonitor?.visibleRect
         let (topLeft, size) = makeVisibleRestorationFrame(
-            monitorVisibleRect: monitorVisibleRect,
+            knownVisibleRect: knownVisibleRect,
+            currentWindowRect: windowRect,
             preferredSize: window.lastFloatingSize,
         )
         try await window.setAxFrameBlocking(topLeft, size)
+    } catch {
+        eprint("Failed to restore window \(window.windowId) before termination: \(error)")
     }
+}
+
+func makeVisibleRestorationFrame(
+    knownVisibleRect: Rect?,
+    currentWindowRect: Rect?,
+    preferredSize: CGSize?,
+) -> (topLeft: CGPoint, size: CGSize) {
+    let monitorVisibleRect = knownVisibleRect ?? currentWindowRect?.center.monitorApproximation.visibleRect ?? mainMonitor.visibleRect
+    return makeVisibleRestorationFrame(
+        monitorVisibleRect: monitorVisibleRect,
+        preferredSize: preferredSize ?? currentWindowRect?.size,
+    )
 }
 
 func makeVisibleRestorationFrame(monitorVisibleRect: Rect, preferredSize: CGSize?) -> (topLeft: CGPoint, size: CGSize) {
