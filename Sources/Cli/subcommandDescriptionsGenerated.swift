@@ -2,6 +2,7 @@
 // TO REGENERATE THE FILE RUN generate.sh
 
 let subcommandDescriptions = [
+    ["  assign-focused-app-to-workspace", "Persistently assign the focused app to a workspace"],
     ["  balance-sizes", "Balance sizes of all windows in the current workspace"],
     ["  close-all-windows-but-current", "On the focused workspace, close all windows but current"],
     ["  close", "Close the focused window"],

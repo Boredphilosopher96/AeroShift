@@ -1,6 +1,9 @@
 // FILE IS GENERATED FROM docs/aeroshift-*.adoc files
 // TO REGENERATE THE FILE RUN generate.sh
 
+let assign_focused_app_to_workspace_help_generated = """
+    USAGE: assign-focused-app-to-workspace [-h|--help] <workspace-name>
+    """
 let balance_sizes_help_generated = """
     USAGE: balance-sizes [-h|--help] [--workspace <workspace>]
     """

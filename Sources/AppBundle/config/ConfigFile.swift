@@ -2,24 +2,49 @@ import Common
 import Foundation
 
 let configDotfileName = ".aeroshift.toml"
+let legacyAerospaceConfigDotfileName = ".aerospace.toml"
+
 func findCustomConfigUrl() -> ConfigFile {
     let xdgConfigHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"].map { URL(filePath: $0) }
         ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: ".config/")
-    let candidates: [URL] = switch serverArgs.configLocation {
-        case let configLocation?: [URL(filePath: configLocation)]
-        case nil:
-            [
-                FileManager.default.homeDirectoryForCurrentUser.appending(path: configDotfileName),
-                xdgConfigHome.appending(path: "aeroshift").appending(path: "aeroshift.toml"),
-            ]
+    return resolveCustomConfigUrl(
+        explicitConfigLocation: serverArgs.configLocation,
+        home: FileManager.default.homeDirectoryForCurrentUser,
+        xdgConfigHome: xdgConfigHome,
+    ) { candidate in
+        FileManager.default.fileExists(atPath: candidate.path)
     }
-    let existingCandidates: [URL] = candidates.filter { (candidate: URL) in FileManager.default.fileExists(atPath: candidate.path) }
-    let count = existingCandidates.count
-    return switch count {
-        case 0: .noCustomConfigExists
-        case 1: .file(existingCandidates.first.orDie())
-        default: .ambiguousConfigError(existingCandidates)
+}
+
+func resolveCustomConfigUrl(
+    explicitConfigLocation: String?,
+    home: URL,
+    xdgConfigHome: URL,
+    fileExists: (URL) -> Bool,
+) -> ConfigFile {
+    if let explicitConfigLocation {
+        return .file(URL(filePath: explicitConfigLocation))
     }
+
+    let aeroshiftCandidates = [
+        home.appending(path: configDotfileName),
+        xdgConfigHome.appending(path: "aeroshift").appending(path: "aeroshift.toml"),
+    ].filter(fileExists)
+
+    if !aeroshiftCandidates.isEmpty {
+        return aeroshiftCandidates.singleOrNil().map(ConfigFile.file) ?? .ambiguousConfigError(aeroshiftCandidates)
+    }
+
+    let aerospaceCandidates = [
+        home.appending(path: legacyAerospaceConfigDotfileName),
+        xdgConfigHome.appending(path: "aerospace").appending(path: "aerospace.toml"),
+    ].filter(fileExists)
+
+    if !aerospaceCandidates.isEmpty {
+        return aerospaceCandidates.singleOrNil().map(ConfigFile.file) ?? .ambiguousConfigError(aerospaceCandidates)
+    }
+
+    return .noCustomConfigExists
 }
 
 enum ConfigFile {

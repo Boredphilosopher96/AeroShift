@@ -4,6 +4,8 @@ extension CmdArgs {
     func toCommand() -> any Command {
         let command: any Command
         switch Self.info.kind {
+            case .assignFocusedAppToWorkspace:
+                command = AssignFocusedAppToWorkspaceCommand(args: self as! AssignFocusedAppToWorkspaceCmdArgs)
             case ._false:
                 command = FalseCommand(args: self as! FalseCmdArgs)
             case ._true:

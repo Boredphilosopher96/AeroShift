@@ -1,6 +1,7 @@
 public enum CmdKind: String, CaseIterable, Equatable, Sendable {
     // Sorted
 
+    case assignFocusedAppToWorkspace = "assign-focused-app-to-workspace"
     case _false = "false"
     case _true = "true"
     case balanceSizes = "balance-sizes"
@@ -48,6 +49,8 @@ func initSubcommands() -> [String: any SubCommandParserProtocol] {
     var result: [String: any SubCommandParserProtocol] = [:]
     for kind in CmdKind.allCases {
         switch kind {
+            case .assignFocusedAppToWorkspace:
+                result[kind.rawValue] = SubCommandParser(AssignFocusedAppToWorkspaceCmdArgs.init)
             case ._false:
                 result[kind.rawValue] = SubCommandParser(FalseCmdArgs.init)
             case ._true:

@@ -1,0 +1,40 @@
+= aeroshift-assign-focused-app-to-workspace(1)
+include::util/man-attributes.adoc[]
+:manname: aeroshift-assign-focused-app-to-workspace
+// tag::purpose[]
+:manpurpose: Persistently assign the focused app to a workspace
+// end::purpose[]
+
+// =========================================================== Synopsis
+== Synopsis
+[verse]
+// tag::synopsis[]
+aeroshift assign-focused-app-to-workspace [-h|--help] <workspace-name>
+
+// end::synopsis[]
+
+// =========================================================== Description
+== Description
+
+// tag::body[]
+{manpurpose}
+
+The command updates the loaded config file by adding or updating an `on-window-detected` rule for the app that owns the focused window.
+The focused window is also moved to the target workspace immediately.
+
+If Aeroshift is running with the bundled default config because no custom config exists, the command first creates `~/.aeroshift.toml` from the bundled default config and writes the assignment there.
+
+// =========================================================== Options
+include::./util/conditional-options-header.adoc[]
+
+-h, --help:: Print help
+
+// =========================================================== Arguments
+include::./util/conditional-arguments-header.adoc[]
+
+<workspace-name>:: Workspace name to assign the focused app to
+
+// end::body[]
+
+// =========================================================== Footer
+include::util/man-footer.adoc[]

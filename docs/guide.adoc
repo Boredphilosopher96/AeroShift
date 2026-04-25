@@ -64,13 +64,18 @@ xattr -d com.apple.quarantine /Applications/Aeroshift.app
 [#config-location]
 === Custom config location
 
-Aeroshift tries to find the custom config in two locations:
+Aeroshift first tries to find the custom config in two AeroShift locations:
 
 . `~/.aeroshift.toml`
 . `+${XDG_CONFIG_HOME}/aeroshift/aeroshift.toml+`
 (environment variable `XDG_CONFIG_HOME` fallbacks to `~/.config` if the variable is not presented)
 
-If the config is found in more than one location then the ambiguity is reported.
+If no AeroShift config exists, Aeroshift falls back to upstream AeroSpace config locations:
+
+. `~/.aerospace.toml`
+. `+${XDG_CONFIG_HOME}/aerospace/aerospace.toml+`
+
+If a config is found in more than one location within the active family then the ambiguity is reported.
 
 === Config samples
 
