@@ -71,12 +71,14 @@ extension Window {
         let workspace = context.workspace
         let windowRect = try await getAxRect() // Probably not idempotent
         let currentMonitor = windowRect?.center.monitorApproximation
-        if let currentMonitor, let windowRect, workspace != currentMonitor.activeWorkspace {
+        let workspaceRect = workspace.workspaceMonitor.visibleRect
+        if let windowRect, windowRect.isNearBottomHideCorner(outside: workspaceRect) {
+            setAxFrame(windowRect.topLeftConstrainedInside(workspaceRect), nil)
+        } else if let currentMonitor, let windowRect, workspace != currentMonitor.activeWorkspace {
             let windowTopLeftCorner = windowRect.topLeftCorner
             let xProportion = (windowTopLeftCorner.x - currentMonitor.visibleRect.topLeftX) / currentMonitor.visibleRect.width
             let yProportion = (windowTopLeftCorner.y - currentMonitor.visibleRect.topLeftY) / currentMonitor.visibleRect.height
 
-            let workspaceRect = workspace.workspaceMonitor.visibleRect
             var newX = workspaceRect.topLeftX + xProportion * workspaceRect.width
             var newY = workspaceRect.topLeftY + yProportion * workspaceRect.height
 

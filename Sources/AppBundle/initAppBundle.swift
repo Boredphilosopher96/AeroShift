@@ -10,7 +10,7 @@ import Foundation
         if isDebug {
             await toggleReleaseServerIfDebug(.off)
             interceptTermination(SIGINT)
-            interceptTermination(SIGKILL)
+            interceptTermination(SIGTERM)
         }
         if try await !reloadConfig() {
             var out = ""
