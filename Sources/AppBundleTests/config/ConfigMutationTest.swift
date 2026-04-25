@@ -11,6 +11,24 @@ final class ConfigMutationTest: XCTestCase {
         assertEquals(parseConfig(updated).errors, [])
     }
 
+    func testAppendQuotesWorkspaceNameInGeneratedCommand() {
+        let workspaceName = #"foo"bar"#
+        let updated = assignAppToWorkspaceInConfig("config-version = 2\n", appId: "com.example.App", workspaceName: workspaceName)
+        let parsed = parseConfig(updated)
+
+        assertEquals(parsed.errors, [])
+        assertEquals(assignedWorkspaceName(from: parsed.config), workspaceName)
+    }
+
+    func testAppendHandlesWorkspaceNameWithBothQuoteCharacters() {
+        let workspaceName = #"foo'"bar"#
+        let updated = assignAppToWorkspaceInConfig("config-version = 2\n", appId: "com.example.App", workspaceName: workspaceName)
+        let parsed = parseConfig(updated)
+
+        assertEquals(parsed.errors, [])
+        assertEquals(assignedWorkspaceName(from: parsed.config), workspaceName)
+    }
+
     func testUpdateSimpleExactAppRule() {
         let updated = assignAppToWorkspaceInConfig(
             """
@@ -103,4 +121,9 @@ final class ConfigMutationTest: XCTestCase {
     func testCommandRejectsInvalidWorkspaceName() {
         assertEquals(parseCommand("assign-focused-app-to-workspace next").errorOrNil, "ERROR: 'next' is a reserved workspace name")
     }
+}
+
+private func assignedWorkspaceName(from config: Config) -> String? {
+    let command = config.onWindowDetected.last?.run.first as? MoveNodeToWorkspaceCommand
+    return command?.args.target.val.workspaceNameOrNil()?.raw
 }

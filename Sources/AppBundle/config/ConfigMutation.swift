@@ -9,7 +9,7 @@ func assignAppToWorkspaceInConfig(_ rawConfig: String, appId: String, workspaceN
         if let runLine = simpleAppAssignmentRunLine(in: lines, start: start, end: end, appId: appId) {
             var updatedLines = lines
             let indent = String(updatedLines[runLine].prefix { $0 == " " || $0 == "\t" })
-            updatedLines[runLine] = "\(indent)run = \(tomlString("move-node-to-workspace \(workspaceName)"))"
+            updatedLines[runLine] = "\(indent)run = \(tomlString(appAssignmentCommand(workspaceName)))"
             return updatedLines.joined(separator: "\n")
         }
     }
@@ -66,8 +66,12 @@ private func appendAppAssignmentBlock(_ rawConfig: String, appId: String, worksp
     return rawConfig + separator + """
         [[on-window-detected]]
             if.app-id = \(tomlString(appId))
-            run = \(tomlString("move-node-to-workspace \(workspaceName)"))
+            run = \(tomlString(appAssignmentCommand(workspaceName)))
         """
+}
+
+private func appAssignmentCommand(_ workspaceName: String) -> String {
+    ["move-node-to-workspace", workspaceName].joinArgs()
 }
 
 private func parseTomlStringPrefix(_ raw: String) -> String? {
