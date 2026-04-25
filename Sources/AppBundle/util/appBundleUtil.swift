@@ -1,5 +1,7 @@
 import AppKit
 import Common
+import Darwin
+import Dispatch
 import Foundation
 import os
 
@@ -7,15 +9,20 @@ let signposter = OSSignposter(subsystem: aeroshiftAppId, category: .pointsOfInte
 
 let myPid = NSRunningApplication.current.processIdentifier
 let lockScreenAppBundleId = "com.apple.loginwindow"
+@MainActor private var terminationSignalSources: [DispatchSourceSignal] = []
 
+@MainActor
 func interceptTermination(_ _signal: Int32) {
-    signal(_signal, { signal in
-        check(Thread.current.isMainThread)
-        Task {
-            defer { exit(signal) }
+    signal(_signal, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: _signal, queue: .main)
+    source.setEventHandler {
+        Task { @MainActor in
+            defer { Darwin.exit(_signal) }
             try await terminationHandler.beforeTermination()
         }
-    } as sig_t)
+    }
+    source.resume()
+    terminationSignalSources.append(source)
 }
 
 @MainActor
@@ -32,19 +39,30 @@ private struct AppServerTerminationHandler: TerminationHandler {
 
 @MainActor
 private func makeAllWindowsVisibleAndRestoreSize() async throws {
-    // Make all windows fullscreen before Quit
     for (_, window) in MacWindow.allWindowsMap {
         // makeAllWindowsVisibleAndRestoreSize may be invoked when something went wrong (e.g. some windows are unbound)
         // that's why it's not allowed to use `.parent` call in here
         let monitor = try await window.getCenter()?.monitorApproximation ?? mainMonitor
         let monitorVisibleRect = monitor.visibleRect
-        let windowSize = window.lastFloatingSize ?? CGSize(width: monitorVisibleRect.width, height: monitorVisibleRect.height)
-        let point = CGPoint(
-            x: (monitorVisibleRect.width - windowSize.width) / 2,
-            y: (monitorVisibleRect.height - windowSize.height) / 2,
+        let (topLeft, size) = makeVisibleRestorationFrame(
+            monitorVisibleRect: monitorVisibleRect,
+            preferredSize: window.lastFloatingSize,
         )
-        try await window.setAxFrameBlocking(point, windowSize)
+        try await window.setAxFrameBlocking(topLeft, size)
     }
+}
+
+func makeVisibleRestorationFrame(monitorVisibleRect: Rect, preferredSize: CGSize?) -> (topLeft: CGPoint, size: CGSize) {
+    let preferredSize = preferredSize ?? monitorVisibleRect.size
+    let size = CGSize(
+        width: min(preferredSize.width, monitorVisibleRect.width),
+        height: min(preferredSize.height, monitorVisibleRect.height),
+    )
+    let topLeft = CGPoint(
+        x: monitorVisibleRect.topLeftX + (monitorVisibleRect.width - size.width) / 2,
+        y: monitorVisibleRect.topLeftY + (monitorVisibleRect.height - size.height) / 2,
+    )
+    return (topLeft, size)
 }
 
 @MainActor

@@ -36,6 +36,28 @@ final class TestWindow: Window, CustomStringConvertible {
         unbindFromParent()
     }
 
+    override func getAxSize() async throws -> CGSize? {
+        _rect?.size
+    }
+
+    override func setAxFrame(_ topLeft: CGPoint?, _ size: CGSize?) {
+        var rect = _rect ?? Rect(
+            topLeftX: topLeft?.x ?? 0,
+            topLeftY: topLeft?.y ?? 0,
+            width: size?.width ?? 0,
+            height: size?.height ?? 0,
+        )
+        if let topLeft {
+            rect.topLeftX = topLeft.x
+            rect.topLeftY = topLeft.y
+        }
+        if let size {
+            rect.width = size.width
+            rect.height = size.height
+        }
+        _rect = rect
+    }
+
     override var title: String {
         get async { // redundant async. todo create bug report to Swift
             description
