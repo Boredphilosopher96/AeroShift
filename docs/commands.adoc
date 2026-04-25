@@ -12,6 +12,13 @@ include::aeroshift-balance-sizes.adoc[tags=synopsis]
 include::aeroshift-balance-sizes.adoc[tags=purpose]
 include::aeroshift-balance-sizes.adoc[tags=body]
 
+== assign-focused-app-to-workspace
+----
+include::aeroshift-assign-focused-app-to-workspace.adoc[tags=synopsis]
+----
+include::aeroshift-assign-focused-app-to-workspace.adoc[tags=purpose]
+include::aeroshift-assign-focused-app-to-workspace.adoc[tags=body]
+
 == close
 ----
 include::aeroshift-close.adoc[tags=synopsis]

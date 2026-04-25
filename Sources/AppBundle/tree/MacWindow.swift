@@ -34,7 +34,7 @@ final class MacWindow: Window {
         allWindowsMap[windowId] = window
 
         try await debugWindowsIfRecording(window)
-        if try await !restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: window) {
+        if try await !restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: window), !isStartup {
             try await tryOnWindowDetected(window)
         }
         return window
@@ -248,6 +248,16 @@ func tryOnWindowDetected(_ window: Window) async throws {
             try await onWindowDetected(window)
         case .macosPopupWindowsContainer:
             break
+    }
+}
+
+@MainActor
+func replayStartupWindowDetectedCallbacks() async throws {
+    let windows: [Window] = isUnitTest
+        ? Workspace.all.flatMap(\.allLeafWindowsRecursive) + macosPopupWindowsContainer.children.filterIsInstance(of: Window.self)
+        : MacWindow.allWindows
+    for window in windows.sortedBy(\.windowId) {
+        try await tryOnWindowDetected(window)
     }
 }
 

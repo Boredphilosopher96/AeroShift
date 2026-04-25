@@ -10,10 +10,14 @@ final class TestApp: AbstractApp {
     @MainActor
     static let shared = TestApp()
 
-    private init() {
-        self.pid = 0
-        self.rawAppBundleId = "io.github.boredphilosopher96.aeroshift.test-app"
-        self.name = rawAppBundleId
+    init(
+        pid: Int32 = 0,
+        rawAppBundleId: String? = "io.github.boredphilosopher96.aeroshift.test-app",
+        name: String? = nil,
+    ) {
+        self.pid = pid
+        self.rawAppBundleId = rawAppBundleId
+        self.name = name ?? rawAppBundleId
     }
 
     var _windows: [Window] = []

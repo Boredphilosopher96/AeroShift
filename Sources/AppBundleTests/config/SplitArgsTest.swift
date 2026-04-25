@@ -9,7 +9,10 @@ final class SplitArgsTest: XCTestCase {
         testSucSplit("'echo' foo", expected: ["echo", "foo"])
         testSucSplit("echo \"'\"", expected: ["echo", "'"])
         testSucSplit("echo '\"'", expected: ["echo", "\""])
+        testSucSplit(#"echo "foo\"bar""#, expected: ["echo", #"foo"bar"#])
+        testSucSplit(#"echo "foo\\bar""#, expected: ["echo", #"foo\bar"#])
         testSucSplit("  echo '  foo bar'", expected: ["echo", "  foo bar"])
+        testSucSplit(["echo", #"foo'"bar"#].joinArgs(), expected: ["echo", #"foo'"bar"#])
 
         testFailSplit("echo 'foo")
         testFailSplit("echo foo'")
