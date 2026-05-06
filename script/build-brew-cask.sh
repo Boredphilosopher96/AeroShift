@@ -20,8 +20,8 @@ if test -z "$zip_uri"; then echo "--zip-uri is mandatory" > /dev/stderr; exit 1;
 if test -z "$cask_name"; then echo "--cask-name is mandatory" > /dev/stderr; exit 1; fi
 
 case "$cask_name" in
-    aeroshift) conflicts_with_casks="conflicts_with cask: ['aerospace', 'aerospace-dev', 'aeroshift-dev']";;
-    aeroshift-dev) conflicts_with_casks="conflicts_with cask: ['aerospace', 'aerospace-dev', 'aeroshift']";;
+    aeroshift) conflicts_with_casks="conflicts_with cask: ['aeroshift-dev']";;
+    aeroshift-dev) conflicts_with_casks="conflicts_with cask: ['aeroshift']";;
     *) echo "Unknown cask name: $cask_name. Allowed cask names: aeroshift, aeroshift-dev" > /dev/stderr; exit 1;;
 esac
 
