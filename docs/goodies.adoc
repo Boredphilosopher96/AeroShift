@@ -99,7 +99,7 @@ Alternatively, inspect the source code, and build it yourself.
 You can integrate Aeroshift workspace indicators with link:https://github.com/FelixKratz/SketchyBar[Sketchybar].
 Use these snippets as a starting point.
 
-.~/.aeroshift.toml
+.~/.config/.aeroshift.toml
 [source,toml]
 ----
 # Run Sketchybar together with Aeroshift
@@ -154,7 +154,7 @@ link:https://github.com/Jean-Tinland/simple-bar[simple-bar] can be used to displ
 
 In order to sync simple-bar with Aeroshift, add these lines to your Aeroshift config file:
 
-.~/.aeroshift.toml
+.~/.config/.aeroshift.toml
 [source,toml]
 ----
 # Notify simple-bar about window focus change
@@ -216,7 +216,7 @@ end tell'
 
 If `automatically-unhide-macos-hidden-apps` isn't enough, you can disable `cmd-h` altogether (which will make this hotkey unavailable for apps that might use it for other purposes)
 
-.~/.aeroshift.toml
+.~/.config/.aeroshift.toml
 [source,toml]
 ----
 [mode.main.binding]
@@ -230,7 +230,7 @@ If `automatically-unhide-macos-hidden-apps` isn't enough, you can disable `cmd-h
 You can configure a custom shortcut to take a screenshot.
 `screencapture` is a built-in macOS command.
 
-.~/.aeroshift.toml
+.~/.config/.aeroshift.toml
 [source,toml]
 ----
 alt-shift-s = 'exec-and-forget screencapture -i -c'

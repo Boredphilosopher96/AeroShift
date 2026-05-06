@@ -7,9 +7,10 @@ let legacyAerospaceConfigDotfileName = ".aerospace.toml"
 func findCustomConfigUrl() -> ConfigFile {
     let xdgConfigHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"].map { URL(filePath: $0) }
         ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: ".config/")
+    let home = FileManager.default.homeDirectoryForCurrentUser
     return resolveCustomConfigUrl(
         explicitConfigLocation: serverArgs.configLocation,
-        home: FileManager.default.homeDirectoryForCurrentUser,
+        home: home,
         xdgConfigHome: xdgConfigHome,
     ) { candidate in
         FileManager.default.fileExists(atPath: candidate.path)
@@ -27,6 +28,7 @@ func resolveCustomConfigUrl(
     }
 
     let aeroshiftCandidates = [
+        initialAeroshiftConfigUrl(home: home),
         home.appending(path: configDotfileName),
         xdgConfigHome.appending(path: "aeroshift").appending(path: "aeroshift.toml"),
     ].filter(fileExists)
@@ -44,11 +46,33 @@ func resolveCustomConfigUrl(
         return aerospaceCandidates.singleOrNil().map(ConfigFile.file) ?? .ambiguousConfigError(aerospaceCandidates)
     }
 
-    return .noCustomConfigExists
+    return .noCustomConfigExists(initialAeroshiftConfigUrl(home: home))
+}
+
+func initialAeroshiftConfigUrl(home: URL) -> URL {
+    home.appending(path: ".config").appending(path: configDotfileName)
+}
+
+func createInitialConfigFile(at target: URL, from source: URL = defaultConfigUrl) -> Result<Void, String> {
+    let fm = FileManager.default
+    if fm.fileExists(atPath: target.path) {
+        return .success(())
+    }
+
+    do {
+        try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.copyItem(at: source, to: target)
+        return .success(())
+    } catch {
+        if fm.fileExists(atPath: target.path) {
+            return .success(())
+        }
+        return .failure("Failed to create initial config at \(target.path.singleQuoted): \(error.localizedDescription)")
+    }
 }
 
 enum ConfigFile {
-    case file(URL), ambiguousConfigError(_ candidates: [URL]), noCustomConfigExists
+    case file(URL), ambiguousConfigError(_ candidates: [URL]), noCustomConfigExists(_ initialConfigUrl: URL)
 
     var urlOrNil: URL? {
         return switch self {

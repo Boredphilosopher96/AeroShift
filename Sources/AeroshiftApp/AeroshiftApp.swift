@@ -20,6 +20,7 @@ struct AeroshiftApp: App {
     @Environment(\.openWindow) var openWindow: OpenWindowAction
 
     init() {
+        NSApp.setActivationPolicy(.accessory)
         initAppBundle()
     }
 

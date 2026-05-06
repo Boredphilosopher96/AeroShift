@@ -12,7 +12,11 @@ func readConfig(forceConfigUrl: URL? = nil) -> Result<(Config, URL), String> {
     } else {
         switch findCustomConfigUrl() {
             case .file(let url): configUrl = url
-            case .noCustomConfigExists: configUrl = defaultConfigUrl
+            case .noCustomConfigExists(let initialConfigUrl):
+                switch createInitialConfigFile(at: initialConfigUrl) {
+                    case .success: configUrl = initialConfigUrl
+                    case .failure(let msg): return .failure(msg)
+                }
             case .ambiguousConfigError(let candidates):
                 let msg = """
                     Ambiguous config error. Several configs found:
