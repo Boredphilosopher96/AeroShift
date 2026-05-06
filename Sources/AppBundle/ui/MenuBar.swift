@@ -69,8 +69,8 @@ func openConfigButton(showShortcutGroup: Bool = false) -> some View {
             case .noCustomConfigExists(let initialConfigUrl):
                 _ = createInitialConfigFile(at: initialConfigUrl)
                 initialConfigUrl.open(with: editor)
-            case .ambiguousConfigError:
-                initialAeroshiftConfigUrl(home: FileManager.default.homeDirectoryForCurrentUser).open(with: editor)
+            case .ambiguousConfigError(let candidates):
+                candidates.first.orDie().open(with: editor)
         }
     }.keyboardShortcut(",", modifiers: .command)
     switch showShortcutGroup {
