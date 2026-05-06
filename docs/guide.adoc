@@ -64,8 +64,9 @@ xattr -d com.apple.quarantine /Applications/Aeroshift.app
 [#config-location]
 === Custom config location
 
-Aeroshift first tries to find the custom config in two AeroShift locations:
+Aeroshift first tries to find the custom config in AeroShift locations:
 
+. `~/.config/.aeroshift.toml`
 . `~/.aeroshift.toml`
 . `+${XDG_CONFIG_HOME}/aeroshift/aeroshift.toml+`
 (environment variable `XDG_CONFIG_HOME` fallbacks to `~/.config` if the variable is not presented)
@@ -95,7 +96,7 @@ See https://toml.io/en/v1.0.0[TOML spec for more info]
 The default config is part of the documentation, it contains all trivial configuration keys with comments.
 Please read the default config!
 Non-trivial configuration options are mentioned further in this guide.
-If no custom config is found, Aeroshift will load the default config.
+If no custom config is found, Aeroshift will create `~/.config/.aeroshift.toml` from the bundled default config and load it.
 
 If the key is omitted in the custom config, it falls back to the value in the default config, unless it's stated otherwise for the specific keys. Namely:
 
@@ -110,7 +111,8 @@ You can bootstrap your custom config by copying the default config from the app 
 
 [source,shell]
 ----
-cp /Applications/Aeroshift.app/Contents/Resources/default-config.toml ~/.aeroshift.toml
+mkdir -p ~/.config
+cp /Applications/Aeroshift.app/Contents/Resources/default-config.toml ~/.config/.aeroshift.toml
 ----
 
 link:config-examples/default-config.toml[Download default-config.toml]

@@ -22,7 +22,7 @@ aeroshift assign-focused-app-to-workspace [-h|--help] <workspace-name>
 The command updates the loaded config file by adding or updating an `on-window-detected` rule for the app that owns the focused window.
 The focused window is also moved to the target workspace immediately.
 
-If Aeroshift is running with the bundled default config because no custom config exists, the command first creates `~/.aeroshift.toml` from the bundled default config and writes the assignment there.
+If Aeroshift is running with the bundled default config because no custom config exists, the command first creates `~/.config/.aeroshift.toml` from the bundled default config and writes the assignment there.
 
 // =========================================================== Options
 include::./util/conditional-options-header.adoc[]

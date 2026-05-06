@@ -1,5 +1,5 @@
-# Place a copy of this config to ~/.aeroshift.toml
-# After that, you can edit ~/.aeroshift.toml to your liking
+# Place a copy of this config to ~/.config/.aeroshift.toml
+# After that, you can edit ~/.config/.aeroshift.toml to your liking
 # Aeroshift is an unofficial fork of upstream AeroSpace.
 # Upstream reference links below are kept as historical and behavioral context.
 

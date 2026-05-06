@@ -69,7 +69,8 @@ private let serverHelp = """
     OPTIONS:
       -h, --help              Print help
       -v, --version           Print Aeroshift.app version
-      --config-path <path>    Config path. It will take priority over ~/.aeroshift.toml
+      --config-path <path>    Config path. It will take priority over ~/.config/.aeroshift.toml,
+                              ~/.aeroshift.toml,
                               ${XDG_CONFIG_HOME}/aeroshift/aeroshift.toml,
                               ~/.aerospace.toml, and
                               ${XDG_CONFIG_HOME}/aerospace/aerospace.toml
