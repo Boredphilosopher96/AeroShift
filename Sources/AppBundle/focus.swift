@@ -60,18 +60,32 @@ private struct FrozenFocus: AeroAny, Equatable, Sendable {
 /// AEROSHIFT_WORKSPACE env before accessing the global focus.
 @MainActor var focus: LiveFocus { _focus.live }
 
+@MainActor private var workspaceNameToLastFocusedWindowId: [String: UInt32] = [:]
+
+@MainActor func resetWorkspaceFocusHistoryForTests() {
+    if isUnitTest {
+        workspaceNameToLastFocusedWindowId = [:]
+    }
+}
+
 @MainActor func setFocus(to newFocus: LiveFocus) -> Bool {
     if _focus == newFocus.frozen { return true }
     let oldFocus = focus
     // Normalize mruWindow when focus away from a workspace
     if oldFocus.workspace != newFocus.workspace {
-        oldFocus.windowOrNil?.markAsMostRecentChild()
+        if let window = oldFocus.windowOrNil {
+            workspaceNameToLastFocusedWindowId[oldFocus.workspace.name] = window.windowId
+            window.markAsMostRecentChild()
+        }
     }
 
     _focus = newFocus.frozen
     let status = newFocus.workspace.workspaceMonitor.setActiveWorkspace(newFocus.workspace)
 
-    newFocus.windowOrNil?.markAsMostRecentChild()
+    if let window = newFocus.windowOrNil {
+        workspaceNameToLastFocusedWindowId[newFocus.workspace.name] = window.windowId
+        window.markAsMostRecentChild()
+    }
     return status
 }
 extension Window {
@@ -90,14 +104,26 @@ extension Window {
 extension Workspace {
     @MainActor func focusWorkspace() -> Bool { setFocus(to: toLiveFocus()) }
 
+    @MainActor
     func toLiveFocus() -> LiveFocus {
         // todo unfortunately mostRecentWindowRecursive may recursively reach empty rootTilingContainer
         //      while floating or macos unconventional windows might be presented
-        if let wd = mostRecentWindowRecursive ?? anyLeafWindowRecursive {
+        if let wd = lastFocusedWindowOrNil ?? mostRecentWindowRecursive ?? anyLeafWindowRecursive {
             LiveFocus(windowOrNil: wd, workspace: self)
         } else {
             LiveFocus(windowOrNil: nil, workspace: self) // emptyWorkspace
         }
+    }
+
+    @MainActor
+    private var lastFocusedWindowOrNil: Window? {
+        guard let windowId = workspaceNameToLastFocusedWindowId[name],
+              let window = Window.get(byId: windowId),
+              window.visualWorkspace == self
+        else {
+            return nil
+        }
+        return window
     }
 }
 
