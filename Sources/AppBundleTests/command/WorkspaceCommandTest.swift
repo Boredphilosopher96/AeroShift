@@ -19,4 +19,27 @@ final class WorkspaceCommandTest: XCTestCase {
         testParseCommandSucc("workspace --stdin next", WorkspaceCmdArgs(target: .relative(.next)).copy(\.explicitStdinFlag, true))
         testParseCommandSucc("workspace --no-stdin next", WorkspaceCmdArgs(target: .relative(.next)).copy(\.explicitStdinFlag, false))
     }
+
+    func testWorkspaceSwitchRestoresLastFocusedWindowEvenIfTreeMruChangesWhileAway() {
+        let workspaceA = Workspace.get(byName: "a")
+        var focusedWindow: Window!
+        workspaceA.rootTilingContainer.apply {
+            focusedWindow = TestWindow.new(id: 1, parent: $0)
+            TestWindow.new(id: 2, parent: $0)
+        }
+        assertEquals(focusedWindow.focusWindow(), true)
+
+        let workspaceB = Workspace.get(byName: "b")
+        workspaceB.rootTilingContainer.apply {
+            TestWindow.new(id: 3, parent: $0)
+        }
+        assertEquals(workspaceB.focusWorkspace(), true)
+        assertEquals(focus.windowOrNil?.windowId, 3)
+
+        TestWindow.new(id: 4, parent: workspaceA.rootTilingContainer)
+        assertEquals(workspaceA.mostRecentWindowRecursive?.windowId, 4)
+
+        assertEquals(workspaceA.focusWorkspace(), true)
+        assertEquals(focus.windowOrNil?.windowId, 1)
+    }
 }

@@ -17,6 +17,7 @@ let projectRoot: URL = {
 func setUpWorkspacesForTests() {
     resetAppBundleTerminationForTests()
     resetAppBundleTerminationCleanupForTests()
+    resetWorkspaceFocusHistoryForTests()
     config = defaultConfig
     configUrl = defaultConfigUrl
     config.enableNormalizationFlattenContainers = false // Make layout tests more predictable
